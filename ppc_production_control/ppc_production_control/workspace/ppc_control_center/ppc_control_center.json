@@ -1,7 +1,7 @@
 {
  "app": "ppc_production_control",
  "charts": [],
- "content": "[{\"id\": \"cc00\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>PPC Control Center</b></span>\", \"col\": 12}}, {\"id\": \"cc01\", \"type\": \"paragraph\", \"data\": {\"text\": \"Production Planning &amp; Control on top of the standard ERPNext Production Plan.\", \"col\": 12}}, {\"id\": \"cc10\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Dashboard\", \"col\": 3}}, {\"id\": \"cc11\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Plans\", \"col\": 3}}, {\"id\": \"cc12\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Work Orders\", \"col\": 3}}, {\"id\": \"cc13\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Job Cards\", \"col\": 3}}, {\"id\": \"cc14\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Gantt\", \"col\": 3}}, {\"id\": \"cc15\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Workload & Capacity\", \"col\": 3}}, {\"id\": \"cc16\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Schedule History\", \"col\": 3}}, {\"id\": \"cc17\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Exceptions & Failed Synchronizations\", \"col\": 3}}, {\"id\": \"cc20\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"cc21\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup &amp; Records</b></span>\", \"col\": 12}}, {\"id\": \"cc22\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"PPC Settings\", \"col\": 3}}, {\"id\": \"cc23\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"PPC Audit Log\", \"col\": 3}}, {\"id\": \"cc24\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Plan (ERPNext)\", \"col\": 3}}]",
+ "content": "[{\"id\": \"cc00\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>PPC Control Center</b></span>\", \"col\": 12}}, {\"id\": \"cc01\", \"type\": \"paragraph\", \"data\": {\"text\": \"Production Planning &amp; Control on top of the standard ERPNext Production Plan.\", \"col\": 12}}, {\"id\": \"cc10\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Dashboard\", \"col\": 3}}, {\"id\": \"cc11\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Plans\", \"col\": 3}}, {\"id\": \"cc12\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Work Orders\", \"col\": 3}}, {\"id\": \"cc13\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Job Cards\", \"col\": 3}}, {\"id\": \"cc14\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Gantt\", \"col\": 3}}, {\"id\": \"cc15\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Workload & Capacity\", \"col\": 3}}, {\"id\": \"cc16\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Schedule History\", \"col\": 3}}, {\"id\": \"cc17\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Exceptions & Failed Synchronizations\", \"col\": 3}}, {\"id\": \"mp00\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Material Planning (MRP)</b></span>\", \"col\": 12}}, {\"id\": \"mp01\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Material Planning (MRP)\", \"col\": 3}}, {\"id\": \"mp02\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Runs\", \"col\": 3}}, {\"id\": \"mp03\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Item Wise\", \"col\": 3}}, {\"id\": \"mp04\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Warehouse Wise\", \"col\": 3}}, {\"id\": \"mp05\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Date Wise\", \"col\": 3}}, {\"id\": \"mp90\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"cc20\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"cc21\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup &amp; Records</b></span>\", \"col\": 12}}, {\"id\": \"cc22\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"PPC Settings\", \"col\": 3}}, {\"id\": \"cc23\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"PPC Audit Log\", \"col\": 3}}, {\"id\": \"cc24\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Production Plan (ERPNext)\", \"col\": 3}}]",
  "creation": "2026-10-26 00:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -107,6 +107,36 @@
    "type": "DocType",
    "doc_view": "List",
    "color": "Grey"
+  },
+  {
+   "label": "Material Planning (MRP)",
+   "link_to": "ppc-mrp-dashboard",
+   "type": "Page",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Runs",
+   "link_to": "PPC MRP Run",
+   "type": "DocType",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Item Wise",
+   "link_to": "PPC MRP Item Wise",
+   "type": "Report",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Warehouse Wise",
+   "link_to": "PPC MRP Warehouse Wise",
+   "type": "Report",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Date Wise",
+   "link_to": "PPC MRP Date Wise",
+   "type": "Report",
+   "color": "Green"
   }
  ],
  "title": "PPC Control Center"

@@ -194,6 +194,13 @@ def _recommendation_fields() -> dict:
 
 CUSTOM_FIELDS.update(_recommendation_fields())
 
+# Which MRP Run created a draft Material Request / Work Order (shown on the document, never copied).
+for _doctype, _after in (("Material Request", "company"), ("Work Order", "company")):
+	CUSTOM_FIELDS.setdefault(_doctype, []).append(
+		{"fieldname": "ppc_mrp_run", "label": "PPC MRP Run", "fieldtype": "Link", "options": "PPC MRP Run", "read_only": 1, "no_copy": 1,
+		 "allow_on_submit": 1, "insert_after": _after}
+	)
+
 # Fields of earlier iterations of this app; removed on migrate so no orphan columns remain.
 OBSOLETE_CUSTOM_FIELDS = {
 	"Work Order": ["ppc_production_plan", "ppc_plan_item", "ppc_idempotency_key"],

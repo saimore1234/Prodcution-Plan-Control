@@ -1,0 +1,314 @@
+{
+ "actions": [],
+ "creation": "2026-10-30 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "status",
+  "column_break_1",
+  "from_date",
+  "to_date",
+  "section_sources",
+  "include_sales_orders",
+  "include_production_plans",
+  "section_warehouses",
+  "default_warehouse",
+  "working_hours_per_day",
+  "warehouses",
+  "section_summary",
+  "demand_lines",
+  "demand_qty",
+  "shortage_items",
+  "shortage_qty",
+  "purchase_lines",
+  "column_break_2",
+  "purchase_qty",
+  "production_lines",
+  "production_qty",
+  "review_lines",
+  "late_lines",
+  "section_result",
+  "calculated_on",
+  "calculated_by",
+  "material_request",
+  "warnings",
+  "section_lines",
+  "lines",
+  "section_demands",
+  "demands"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nCalculated\nDocuments Created",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "Demand From",
+   "description": "Leave empty to include overdue demand."
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "Demand Until",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_sources",
+   "fieldtype": "Section Break",
+   "label": "Demand"
+  },
+  {
+   "fieldname": "include_sales_orders",
+   "fieldtype": "Check",
+   "label": "Sales Orders",
+   "default": "1",
+   "description": "Open Sales Order lines (ordered minus delivered)."
+  },
+  {
+   "fieldname": "include_production_plans",
+   "fieldtype": "Check",
+   "label": "Production Plans",
+   "default": "1",
+   "description": "Plan rows without a Sales Order. Rows that belong to a Sales Order line are never counted twice."
+  },
+  {
+   "fieldname": "section_warehouses",
+   "fieldtype": "Section Break",
+   "label": "Warehouses and Lead Time"
+  },
+  {
+   "fieldname": "default_warehouse",
+   "fieldtype": "Link",
+   "label": "Default Warehouse",
+   "options": "Warehouse",
+   "reqd": 1,
+   "description": "Used for demand and components that name no warehouse. Always one of the selected warehouses."
+  },
+  {
+   "fieldname": "working_hours_per_day",
+   "fieldtype": "Float",
+   "label": "Working Hours per Day",
+   "default": "8",
+   "description": "Turns BOM operation time into days of lead time."
+  },
+  {
+   "fieldname": "warehouses",
+   "fieldtype": "Table",
+   "label": "Warehouses",
+   "options": "PPC MRP Warehouse",
+   "description": "Only demand in these warehouses is planned, and stock is checked in each of them separately. Empty = every warehouse."
+  },
+  {
+   "fieldname": "section_summary",
+   "fieldtype": "Section Break",
+   "label": "Summary"
+  },
+  {
+   "fieldname": "demand_lines",
+   "fieldtype": "Int",
+   "label": "Demand Lines",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "demand_qty",
+   "fieldtype": "Float",
+   "label": "Total Demand (qty)",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "shortage_items",
+   "fieldtype": "Int",
+   "label": "Items Short",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "shortage_qty",
+   "fieldtype": "Float",
+   "label": "Total Shortage (qty)",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "purchase_lines",
+   "fieldtype": "Int",
+   "label": "Purchase Lines",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "purchase_qty",
+   "fieldtype": "Float",
+   "label": "Purchase Qty",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "production_lines",
+   "fieldtype": "Int",
+   "label": "Production Lines",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "production_qty",
+   "fieldtype": "Float",
+   "label": "Production Qty",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "review_lines",
+   "fieldtype": "Int",
+   "label": "Lines Needing Review",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "late_lines",
+   "fieldtype": "Int",
+   "label": "Late Lines",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_result",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "fieldname": "calculated_on",
+   "fieldtype": "Datetime",
+   "label": "Calculated On",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "calculated_by",
+   "fieldtype": "Link",
+   "label": "Calculated By",
+   "options": "User",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "material_request",
+   "fieldtype": "Link",
+   "label": "Draft Material Request",
+   "options": "Material Request",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "warnings",
+   "fieldtype": "Small Text",
+   "label": "Warnings",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_lines",
+   "fieldtype": "Section Break",
+   "label": "Recommendations"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Material Requirements",
+   "options": "PPC MRP Line",
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_demands",
+   "fieldtype": "Section Break",
+   "label": "Demand Lines",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "demands",
+   "fieldtype": "Table",
+   "label": "Demand",
+   "options": "PPC MRP Demand",
+   "no_copy": 1
+  }
+ ],
+ "istable": 0,
+ "links": [],
+ "modified": "2026-10-30 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "PPC Production Control",
+ "name": "PPC MRP Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "PPC Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "Production Planner",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "PPC Viewer",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "autoname": "format:MRP-{#####}",
+ "is_submittable": 0,
+ "title_field": "company",
+ "show_title_field_in_link": 0
+}

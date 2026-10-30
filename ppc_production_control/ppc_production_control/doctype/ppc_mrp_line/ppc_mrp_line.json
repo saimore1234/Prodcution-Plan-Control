@@ -1,0 +1,204 @@
+{
+ "actions": [],
+ "creation": "2026-10-30 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "warehouse",
+  "required_date",
+  "gross_qty",
+  "from_stock",
+  "from_supply",
+  "net_qty",
+  "uom",
+  "action",
+  "create_document",
+  "bom_no",
+  "lead_time_days",
+  "planned_order_date",
+  "is_late",
+  "level",
+  "sources",
+  "actual_qty",
+  "reserved_qty",
+  "incoming_qty",
+  "document_type",
+  "document",
+  "status",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item",
+   "options": "Item",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Warehouse",
+   "options": "Warehouse",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "required_date",
+   "fieldtype": "Date",
+   "label": "Required On",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "gross_qty",
+   "fieldtype": "Float",
+   "label": "Required",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "from_stock",
+   "fieldtype": "Float",
+   "label": "From Stock",
+   "read_only": 1
+  },
+  {
+   "fieldname": "from_supply",
+   "fieldtype": "Float",
+   "label": "From Pending Supply",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_qty",
+   "fieldtype": "Float",
+   "label": "Shortage",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "label": "UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "label": "Action",
+   "options": "None\nPurchase\nManufacture\nReview",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "create_document",
+   "fieldtype": "Check",
+   "label": "Create Draft",
+   "default": "0"
+  },
+  {
+   "fieldname": "bom_no",
+   "fieldtype": "Link",
+   "label": "BOM",
+   "options": "BOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lead_time_days",
+   "fieldtype": "Int",
+   "label": "Lead Time (days)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planned_order_date",
+   "fieldtype": "Date",
+   "label": "Order / Start By",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_late",
+   "fieldtype": "Check",
+   "label": "Late",
+   "read_only": 1
+  },
+  {
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "label": "BOM Level",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sources",
+   "fieldtype": "Data",
+   "label": "Needed For",
+   "read_only": 1
+  },
+  {
+   "fieldname": "actual_qty",
+   "fieldtype": "Float",
+   "label": "In Stock",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reserved_qty",
+   "fieldtype": "Float",
+   "label": "Reserved",
+   "read_only": 1
+  },
+  {
+   "fieldname": "incoming_qty",
+   "fieldtype": "Float",
+   "label": "Pending Supply",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Data",
+   "label": "Document Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document",
+   "fieldtype": "Data",
+   "label": "Draft Document",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "label": "Result",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-30 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "PPC Production Control",
+ "name": "PPC MRP Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "editable_grid": 1
+}

@@ -19,7 +19,7 @@ from frappe import _
 from frappe.utils import cint
 
 from ppc_production_control.services import job_cards as jc_service
-from ppc_production_control.services import control_center, queries, reconcile, recommend, revisions, scheduling, sync, workstation_change
+from ppc_production_control.services import control_center, mrp, queries, reconcile, recommend, revisions, scheduling, sync, workstation_change
 from ppc_production_control.services import work_orders as wo_service
 from ppc_production_control.services.constants import (
 	AUDIT_DT,
@@ -533,3 +533,24 @@ def retry_failed_synchronizations(plan=None, job_card=None) -> dict:
 	if job_card:
 		check_doc_permission("Job Card", job_card, "write")
 	return {"ok": True, **reconcile.retry_failed_synchronizations(plan, job_card)}
+
+
+# ------------------------------------------------------------------------------ material planning (MRP)
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_calculate(run) -> dict:
+	"""Fetch demand, explode the BOMs, net against warehouse stock and store the recommendations on the run."""
+	return {"ok": True, **mrp.calculate(run)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_create_documents(run) -> dict:
+	"""Create draft Material Request / Work Orders from a calculated run (stock is re-checked; nothing is submitted)."""
+	return {"ok": True, **mrp.create_documents(run)}
+
+
+@frappe.whitelist()
+@guarded
+def mrp_dashboard(company=None, run=None) -> dict:
+	return mrp.dashboard(company, run)
