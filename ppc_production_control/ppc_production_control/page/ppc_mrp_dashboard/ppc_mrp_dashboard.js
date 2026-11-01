@@ -19,13 +19,26 @@ frappe.pages["ppc-mrp-dashboard"].on_page_load = function (wrapper) {
 		);
 	}
 
+	function attention(d) {
+		const a = d.attention || {};
+		let h = '<div class="ppc-mrp-cards">' +
+			card(__("Awaiting Review"), a.awaiting_review || 0, null, "#d97706", __("calculated runs")) +
+			card(__("Failed Runs"), a.failed || 0, null, "#dc2626", __("retry from the run or review")) +
+			card(__("Queued Runs"), a.queued || 0, null, "#64748b", __("automatic, not finished")) + "</div>";
+		(d.failed || []).forEach((f) => {
+			h += '<div class="alert alert-danger"><a href="/app/ppc-mrp-run/' + encodeURIComponent(f.name) + '">' + esc(f.name) + "</a>" +
+				(f.source_sales_order ? " · " + esc(f.source_sales_order) : "") + ": " + esc((f.error_message || "").split("\n")[0].slice(0, 200)) + "</div>";
+		});
+		return h;
+	}
+
 	function render(d) {
 		if (!d.run) {
-			$body.html('<p class="text-muted">' + __("No calculated MRP run yet. Create one with “New MRP Run”, then press Calculate.") + "</p>");
+			$body.html(attention(d) + '<p class="text-muted">' + __("No calculated MRP run yet. Create one with “New MRP Run”, then press Calculate.") + "</p>");
 			return;
 		}
 		const s = d.summary || {};
-		let h = '<p class="text-muted">' + __("Run") + ' <a href="/app/ppc-mrp-run/' + encodeURIComponent(d.run) + '">' + esc(d.run) + "</a> · " +
+		let h = attention(d) + '<p class="text-muted">' + __("Run") + ' <a href="/app/ppc-mrp-run/' + encodeURIComponent(d.run) + '">' + esc(d.run) + "</a> · " +
 			esc(d.status) + (d.calculated_on ? " · " + esc(frappe.datetime.str_to_user(d.calculated_on)) : "") + "</p>";
 		h += '<div class="ppc-mrp-cards">' +
 			card(__("Total Demand"), s.demand_lines, s.demand_qty, "#2563eb", __("open demand lines")) +
@@ -48,6 +61,7 @@ frappe.pages["ppc-mrp-dashboard"].on_page_load = function (wrapper) {
 			});
 			h += "</tbody></table>";
 		}
+		h += '<p><a class="btn btn-sm btn-primary" href="/app/ppc-mrp-review/' + encodeURIComponent(d.run) + '">' + __("Open MRP Review") + "</a></p>";
 		h += '<p><a href="/app/query-report/PPC%20MRP%20Item%20Wise?run=' + encodeURIComponent(d.run) + '">' + __("Item-wise report") + "</a> · " +
 			'<a href="/app/query-report/PPC%20MRP%20Warehouse%20Wise?run=' + encodeURIComponent(d.run) + '">' + __("Warehouse-wise report") + "</a> · " +
 			'<a href="/app/query-report/PPC%20MRP%20Date%20Wise?run=' + encodeURIComponent(d.run) + '">' + __("Date-wise report") + "</a></p>";

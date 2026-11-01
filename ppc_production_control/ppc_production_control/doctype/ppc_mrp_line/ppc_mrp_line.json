@@ -15,6 +15,10 @@
   "uom",
   "action",
   "create_document",
+  "approved_qty",
+  "whole_number",
+  "procurement_type",
+  "source_documents",
   "bom_no",
   "lead_time_days",
   "planned_order_date",
@@ -105,6 +109,31 @@
    "fieldtype": "Check",
    "label": "Create Draft",
    "default": "0"
+  },
+  {
+   "fieldname": "approved_qty",
+   "fieldtype": "Float",
+   "label": "Quantity to Create",
+   "description": "Set in the MRP Review; defaults to the shortage."
+  },
+  {
+   "fieldname": "whole_number",
+   "fieldtype": "Check",
+   "label": "Whole Number UOM",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "procurement_type",
+   "fieldtype": "Data",
+   "label": "Procurement Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_documents",
+   "fieldtype": "Small Text",
+   "label": "Source Documents",
+   "read_only": 1
   },
   {
    "fieldname": "bom_no",

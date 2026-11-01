@@ -2,20 +2,25 @@
 
 Everything the calculation needs from ERPNext (items, BOMs, stock positions) comes in through a
 `ctx` object, so the netting rules can be tested without a site. `services/mrp.py` supplies the
-real context; the tests supply a dictionary-backed one.
+real context; the tests supply a dictionary-backed one. Manual and automatic runs both end up here.
 
 Rules (all quantities are in the item's stock UOM):
 
+* The item's **Procurement Type** decides what is recommended for a shortage: *Purchase* -> Material
+  Request, *Manufacture* -> Work Order (needs an active BOM, whose components are then planned in
+  turn: purchased components get a Material Request, manufactured ones a Work Order of their own).
+  An item without a Procurement Type is inferred (has an active BOM -> Manufacture, else purchase
+  item -> Purchase) and flagged so the master data can be completed.
 * Demand is netted per (item, warehouse). Supply is handed out to the earliest requirement first:
   usable stock, then pending supply (open Purchase Orders, Material Requests, Work Orders and any
   draft Material Request / Work Order).
-* Only the *net* shortage of a manufactured item is exploded into its BOM. Components of stock that
-  already exists are therefore never planned a second time (no double counting).
+* Only the *net* shortage of a manufactured item is exploded into its BOM, so components of stock
+  that already exists are never planned a second time (no double counting).
 * Items are processed in low-level order (an item only after every parent that needs it), so a
   component used by several parents is netted once, with all of its demand.
-* A BOM Item that has its own BOM is a sub-assembly (manufactured); anything else is bought.
 * Planned order date = requirement date - lead time. A manufactured item's components are needed on
   the date its production has to start.
+* Every line remembers the Sales Orders / Production Plans it ultimately serves.
 """
 
 import math
@@ -30,6 +35,7 @@ ACTION_NONE = "None"
 EPSILON = 1e-9
 QTY_PRECISION = 6
 MAX_SOURCES = 5
+MAX_ROOTS = 8
 
 
 class MRPError(Exception):
@@ -49,25 +55,58 @@ def _q(value: float) -> float:
 	return 0.0 if abs(value) < EPSILON else value
 
 
+def _bom_for(item: str, bom_no: str | None, ctx) -> str | None:
+	"""The BOM to use: the one named, if still active; otherwise the item's current default."""
+	if bom_no and ctx.bom(bom_no):
+		return bom_no
+	return ctx.default_bom(item)
+
+
+def plan_as(item: str, bom_no: str | None, ctx) -> dict:
+	"""How a shortage of this item is to be covered, from its Procurement Type.
+
+	-> {kind: Purchase | Manufacture | None, bom_no, inferred, note}; kind None means "needs a human"."""
+	info = ctx.item(item)
+	if info is None:
+		return {"kind": None, "bom_no": None, "inferred": False, "note": "Item not found or disabled."}
+	ptype = (info.get("procurement_type") or "").strip()
+	bom = _bom_for(item, bom_no, ctx)
+	if ptype == ACTION_MANUFACTURE:
+		if bom:
+			return {"kind": ACTION_MANUFACTURE, "bom_no": bom, "inferred": False, "note": ""}
+		return {"kind": None, "bom_no": None, "inferred": False, "note": "Procurement Type is Manufacture but the item has no active BOM."}
+	if ptype == ACTION_PURCHASE:
+		if info.get("is_purchase_item"):
+			return {"kind": ACTION_PURCHASE, "bom_no": None, "inferred": False, "note": ""}
+		return {"kind": None, "bom_no": None, "inferred": False, "note": "Procurement Type is Purchase but the item is not allowed to be purchased."}
+	if bom:
+		return {"kind": ACTION_MANUFACTURE, "bom_no": bom, "inferred": True, "note": "Procurement Type not set: assumed Manufacture (has an active BOM)."}
+	if info.get("is_purchase_item"):
+		return {"kind": ACTION_PURCHASE, "bom_no": None, "inferred": True, "note": "Procurement Type not set: assumed Purchase."}
+	return {"kind": None, "bom_no": None, "inferred": True, "note": "Procurement Type not set, no active BOM and not a purchase item."}
+
+
 def _bom_graph(top: list[tuple[str, str | None]], ctx) -> dict[str, set[str]]:
-	"""item -> items it needs, over every BOM reachable from the demanded items."""
+	"""item -> items it needs, over every BOM reachable from the demanded items (manufactured items only)."""
 	edges: dict[str, set[str]] = defaultdict(set)
 	stack = list(top)
 	seen: set[tuple[str, str | None]] = set()
 	while stack:
 		item, bom_no = stack.pop()
 		edges.setdefault(item, set())
-		if not bom_no or (item, bom_no) in seen:
+		if (item, bom_no) in seen:
 			continue
 		seen.add((item, bom_no))
-		bom = ctx.bom(bom_no)
+		how = plan_as(item, bom_no, ctx)
+		if how["kind"] != ACTION_MANUFACTURE:
+			continue
+		bom = ctx.bom(how["bom_no"])
 		if not bom:
 			continue
 		for child in bom["children"]:
 			edges[item].add(child["item_code"])
 			edges.setdefault(child["item_code"], set())
-			if child.get("bom_no"):
-				stack.append((child["item_code"], child["bom_no"]))
+			stack.append((child["item_code"], child.get("bom_no")))
 	return edges
 
 
@@ -99,12 +138,20 @@ def _operation_days(bom: dict, qty: float, hours_per_day: float) -> int:
 	return int(math.ceil(minutes / 60.0 / (hours_per_day or 8)))
 
 
+def _roots_text(roots: list[str]) -> str:
+	unique = list(dict.fromkeys(r for r in roots if r))
+	text = ", ".join(unique[:MAX_ROOTS])
+	return text + (f" (+{len(unique) - MAX_ROOTS} more)" if len(unique) > MAX_ROOTS else "")
+
+
 def run_mrp(demands: list[dict], ctx) -> dict:
 	"""Net the demands and explode what has to be manufactured.
 
-	demands: [{key, item_code, qty, required_date, warehouse, bom_no, source}] (qty in stock UOM)
+	demands: [{key, item_code, qty, required_date, warehouse, bom_no, source, root}] (qty in stock UOM);
+	         `root` names the Sales Order / Production Plan the demand comes from.
 	ctx: today (date), hours_per_day, default_warehouse, warehouses (set | None = any),
-	     item(code) -> {item_name, stock_uom, is_stock_item, is_purchase_item, lead_time_days} | None,
+	     item(code) -> {item_name, stock_uom, is_stock_item, is_purchase_item, procurement_type,
+	                    lead_time_days, whole_number} | None,
 	     default_bom(code) -> str | None,
 	     bom(name) -> {name, item, quantity, fixed_minutes, scaled_minutes, children: [{item_code,
 	     stock_qty, source_warehouse, bom_no}]} | None,
@@ -114,7 +161,7 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 	warnings: list[str] = []
 	today = _as_date(ctx.today)
 
-	# (item, warehouse) -> chunks of requirement; every chunk carries its date, BOM and where it came from
+	# item -> warehouse -> chunks of requirement; each carries its date, BOM, where it came from and its root documents
 	needs: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
 	level: dict[str, int] = defaultdict(int)
 	top = []
@@ -123,18 +170,22 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 		if qty <= 0:
 			continue
 		item = d["item_code"]
-		bom_no = d.get("bom_no")
-		if not bom_no or not ctx.bom(bom_no):  # a line's BOM that was since deactivated falls back to the item's current default
-			bom_no = ctx.default_bom(item)
 		warehouse = d.get("warehouse") or ctx.default_warehouse
 		needs[item][warehouse].append(
-			{"date": _as_date(d["required_date"]), "qty": qty, "bom_no": bom_no, "sources": [d.get("source") or d.get("key")]}
+			{
+				"date": _as_date(d["required_date"]),
+				"qty": qty,
+				"bom_no": d.get("bom_no"),
+				"sources": [d.get("source") or d.get("key")],
+				"roots": [d.get("root") or d.get("source") or d.get("key")],
+			}
 		)
-		top.append((item, bom_no))
+		top.append((item, d.get("bom_no")))
 
 	order = _low_level_order(_bom_graph(top, ctx))
 	lines: list[dict] = []
 	skipped_non_stock: set[str] = set()
+	inferred_items: set[str] = set()
 
 	for item in order:
 		by_wh = needs.get(item)
@@ -155,17 +206,15 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 				incoming_left -= from_supply
 				net = _q(rest - from_supply)
 
-				action, note = ACTION_NONE, ""
-				bom = ctx.bom(chunk["bom_no"]) if chunk["bom_no"] else None
+				action, note, bom, how = ACTION_NONE, "", None, None
 				if net > 0:
-					if info is None:
-						action, note = ACTION_REVIEW, "Item not found or disabled."
-					elif chunk["bom_no"] and bom:
-						action = ACTION_MANUFACTURE
-					elif info.get("is_purchase_item"):
-						action = ACTION_PURCHASE
-					else:
-						action, note = ACTION_REVIEW, "No active BOM and not a purchase item."
+					how = plan_as(item, chunk["bom_no"], ctx)
+					note = how["note"]
+					if how["inferred"]:
+						inferred_items.add(item)
+					action = how["kind"] or ACTION_REVIEW
+					if action == ACTION_MANUFACTURE:
+						bom = ctx.bom(how["bom_no"])
 				lead = int((info or {}).get("lead_time_days") or 0)
 				if action == ACTION_MANUFACTURE:
 					lead = max(lead, _operation_days(bom, net, ctx.hours_per_day))
@@ -174,6 +223,8 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 					"item_code": item,
 					"item_name": (info or {}).get("item_name") or item,
 					"uom": (info or {}).get("stock_uom"),
+					"whole_number": int(bool((info or {}).get("whole_number"))),
+					"procurement_type": (info or {}).get("procurement_type") or "",
 					"warehouse": warehouse,
 					"required_date": chunk["date"],
 					"gross_qty": _q(qty),
@@ -181,12 +232,13 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 					"from_supply": _q(from_supply),
 					"net_qty": net,
 					"action": action,
-					"bom_no": chunk["bom_no"] if action == ACTION_MANUFACTURE else None,
+					"bom_no": how["bom_no"] if action == ACTION_MANUFACTURE else None,
 					"lead_time_days": lead,
 					"planned_order_date": planned if net > 0 else None,
 					"is_late": bool(net > 0 and planned < today),
 					"level": level[item],
 					"sources": ", ".join(dict.fromkeys(chunk["sources"]))[:140],
+					"source_documents": _roots_text(chunk["roots"]),
 					"note": note,
 				}
 				for k in ("actual_qty", "reserved_qty", "incoming_qty"):
@@ -206,12 +258,17 @@ def run_mrp(demands: list[dict], ctx) -> dict:
 						if cqty <= 0:
 							continue
 						needs[child["item_code"]][cwh].append(
-							{"date": planned, "qty": cqty, "bom_no": child.get("bom_no"), "sources": [item]}
+							{"date": planned, "qty": cqty, "bom_no": child.get("bom_no"), "sources": [item], "roots": list(chunk["roots"])}
 						)
 						level[child["item_code"]] = max(level[child["item_code"]], level[item] + 1)
 
 	if skipped_non_stock:
 		warnings.append("Non-stock components are not planned: " + ", ".join(sorted(skipped_non_stock)[:15]))
+	if inferred_items:
+		warnings.append(
+			f"{len(inferred_items)} item(s) have no Procurement Type; it was inferred from the BOM / purchase flag. "
+			"Set it on the Item: " + ", ".join(sorted(inferred_items)[:15])
+		)
 	lines.sort(key=lambda r: (r["level"], r["item_code"], r["warehouse"] or "", r["required_date"]))
 	return {"lines": lines, "warnings": warnings}
 
@@ -224,8 +281,12 @@ def _merge(chunks: list[dict]) -> list[dict]:
 		if key in merged:
 			merged[key]["qty"] += c["qty"]
 			merged[key]["sources"].extend(c["sources"][:MAX_SOURCES])
+			merged[key]["roots"].extend(c["roots"])
 		else:
-			merged[key] = {"date": c["date"], "qty": c["qty"], "bom_no": c["bom_no"], "sources": list(c["sources"][:MAX_SOURCES])}
+			merged[key] = {
+				"date": c["date"], "qty": c["qty"], "bom_no": c["bom_no"],
+				"sources": list(c["sources"][:MAX_SOURCES]), "roots": list(c["roots"]),
+			}
 	return sorted(merged.values(), key=lambda c: (c["date"], c["bom_no"] or ""))
 
 

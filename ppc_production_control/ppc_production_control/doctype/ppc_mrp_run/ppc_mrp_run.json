@@ -6,12 +6,15 @@
  "field_order": [
   "company",
   "status",
+  "trigger",
+  "source_sales_order",
   "column_break_1",
   "from_date",
   "to_date",
   "section_sources",
   "include_sales_orders",
   "include_production_plans",
+  "sources",
   "section_warehouses",
   "default_warehouse",
   "working_hours_per_day",
@@ -33,6 +36,8 @@
   "calculated_by",
   "material_request",
   "warnings",
+  "error_message",
+  "retry_count",
   "section_lines",
   "lines",
   "section_demands",
@@ -52,12 +57,32 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Draft\nCalculated\nDocuments Created",
+   "options": "Draft\nQueued\nCalculated\nDocuments Created\nFailed",
    "default": "Draft",
    "read_only": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "trigger",
+   "fieldtype": "Select",
+   "label": "Trigger",
+   "options": "Manual\nAutomatic",
+   "default": "Manual",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1,
+   "description": "Automatic runs are created when a Sales Order is submitted."
+  },
+  {
+   "fieldname": "source_sales_order",
+   "fieldtype": "Link",
+   "label": "Source Sales Order",
+   "options": "Sales Order",
+   "read_only": 1,
+   "no_copy": 1,
+   "search_index": 1
   },
   {
    "fieldname": "column_break_1",
@@ -73,8 +98,8 @@
    "fieldname": "to_date",
    "fieldtype": "Date",
    "label": "Demand Until",
-   "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Used when no Sales Orders / Production Plans are listed below. Empty = one year ahead."
   },
   {
    "fieldname": "section_sources",
@@ -84,16 +109,23 @@
   {
    "fieldname": "include_sales_orders",
    "fieldtype": "Check",
-   "label": "Sales Orders",
+   "label": "All Open Sales Orders",
    "default": "1",
    "description": "Open Sales Order lines (ordered minus delivered)."
   },
   {
    "fieldname": "include_production_plans",
    "fieldtype": "Check",
-   "label": "Production Plans",
+   "label": "All Open Production Plans",
    "default": "1",
    "description": "Plan rows without a Sales Order. Rows that belong to a Sales Order line are never counted twice."
+  },
+  {
+   "fieldname": "sources",
+   "fieldtype": "Table",
+   "label": "Plan Only These Documents",
+   "options": "PPC MRP Source",
+   "description": "Optional. List Sales Orders and / or Production Plans to plan just those; the date range then does not apply to them."
   },
   {
    "fieldname": "section_warehouses",
@@ -105,7 +137,6 @@
    "fieldtype": "Link",
    "label": "Default Warehouse",
    "options": "Warehouse",
-   "reqd": 1,
    "description": "Used for demand and components that name no warehouse. Always one of the selected warehouses."
   },
   {
@@ -235,6 +266,22 @@
    "label": "Warnings",
    "read_only": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Failure Reason",
+   "read_only": 1,
+   "no_copy": 1,
+   "depends_on": "eval:doc.error_message"
+  },
+  {
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "label": "Failed Attempts",
+   "read_only": 1,
+   "no_copy": 1,
+   "default": "0"
   },
   {
    "fieldname": "section_lines",

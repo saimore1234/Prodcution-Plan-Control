@@ -35,16 +35,16 @@ class Ctx:
 		return dict({"stock": 0, "incoming": 0}, **self._stock.get((item, warehouse), {}))
 
 
-def itm(buy=True, lead=0, stock=True):
-	return {"item_name": "x", "stock_uom": "Nos", "is_stock_item": stock, "is_purchase_item": buy, "lead_time_days": lead}
+def itm(buy=True, lead=0, stock=True, ptype=""):
+	return {"item_name": "x", "stock_uom": "Nos", "is_stock_item": stock, "is_purchase_item": buy, "lead_time_days": lead, "procurement_type": ptype}
 
 
 def child(code, qty, bom_no=None, wh=None):
 	return {"item_code": code, "stock_qty": qty, "bom_no": bom_no, "source_warehouse": wh}
 
 
-def demand(item, qty, on, warehouse="Main", key=None, bom=None):
-	return {"key": key or f"SO:{item}:{on}", "item_code": item, "qty": qty, "required_date": on, "warehouse": warehouse, "bom_no": bom}
+def demand(item, qty, on, warehouse="Main", key=None, bom=None, root=None):
+	return {"key": key or f"SO:{item}:{on}", "item_code": item, "qty": qty, "required_date": on, "warehouse": warehouse, "bom_no": bom, "root": root}
 
 
 def by(lines, item, warehouse="Main"):
@@ -190,6 +190,73 @@ class TestExplosion(unittest.TestCase):
 		self.assertEqual((s["demand_lines"], s["production_lines"]), (1, 2))
 		self.assertGreater(s["purchase_lines"], 0)
 		self.assertEqual(s["review_lines"], 0)
+
+
+class TestProcurementType(unittest.TestCase):
+	def test_purchase_item_with_a_bom_is_still_bought(self):
+		items = {"FG": itm(ptype="Purchase"), "RM": itm(ptype="Purchase")}
+		ctx = Ctx(items, {"B": ("FG", 1, [child("RM", 1)])}, defaults={"FG": "B"})
+		out = e.run_mrp([demand("FG", 5, date(2027, 3, 20))], ctx)
+		self.assertEqual([(r["item_code"], r["action"]) for r in out["lines"]], [("FG", "Purchase")])
+
+	def test_manufacture_item_without_a_bom_needs_review(self):
+		ctx = Ctx({"FG": itm(buy=True, ptype="Manufacture")})
+		line = e.run_mrp([demand("FG", 5, date(2027, 3, 20))], ctx)["lines"][0]
+		self.assertEqual(line["action"], "Review")
+		self.assertIn("no active BOM", line["note"])
+
+	def test_purchase_type_on_an_item_that_cannot_be_purchased_needs_review(self):
+		ctx = Ctx({"FG": itm(buy=False, ptype="Purchase")})
+		self.assertEqual(e.run_mrp([demand("FG", 1, date(2027, 3, 20))], ctx)["lines"][0]["action"], "Review")
+
+	def test_manufactured_item_with_purchased_and_manufactured_components(self):
+		items = {
+			"FG": itm(buy=False, ptype="Manufacture"), "SUB": itm(buy=False, ptype="Manufacture"),
+			"RM": itm(ptype="Purchase"), "RM2": itm(ptype="Purchase"),
+		}
+		boms = {"BF": ("FG", 1, [child("SUB", 1, "BS"), child("RM", 2)]), "BS": ("SUB", 1, [child("RM2", 3)])}
+		out = e.run_mrp([demand("FG", 4, date(2027, 3, 20))], Ctx(items, boms, defaults={"FG": "BF"}))
+		actions = {r["item_code"]: r["action"] for r in out["lines"]}
+		self.assertEqual(actions, {"FG": "Manufacture", "SUB": "Manufacture", "RM": "Purchase", "RM2": "Purchase"})
+		self.assertEqual(by(out["lines"], "RM2")[0]["gross_qty"], 12)
+		self.assertFalse(out["warnings"])  # nothing was inferred
+
+	def test_a_purchase_component_is_not_exploded_even_if_it_has_a_bom(self):
+		items = {"FG": itm(buy=False, ptype="Manufacture"), "C": itm(ptype="Purchase"), "X": itm(ptype="Purchase")}
+		boms = {"BF": ("FG", 1, [child("C", 1, "BC")]), "BC": ("C", 1, [child("X", 1)])}
+		out = e.run_mrp([demand("FG", 1, date(2027, 3, 20))], Ctx(items, boms, defaults={"FG": "BF"}))
+		self.assertEqual(sorted(r["item_code"] for r in out["lines"]), ["C", "FG"])
+
+	def test_a_manufacture_component_uses_its_default_bom_when_the_bom_line_names_none(self):
+		items = {"FG": itm(buy=False, ptype="Manufacture"), "SUB": itm(buy=False, ptype="Manufacture"), "RM": itm(ptype="Purchase")}
+		boms = {"BF": ("FG", 1, [child("SUB", 1)]), "BS": ("SUB", 1, [child("RM", 1)])}
+		out = e.run_mrp([demand("FG", 1, date(2027, 3, 20))], Ctx(items, boms, defaults={"FG": "BF", "SUB": "BS"}))
+		self.assertEqual([r["item_code"] for r in out["lines"]], ["FG", "SUB", "RM"])
+
+	def test_missing_procurement_type_is_inferred_and_reported(self):
+		items = {"FG": itm(buy=False), "RM": itm()}
+		out = e.run_mrp([demand("FG", 1, date(2027, 3, 20))], Ctx(items, {"B": ("FG", 1, [child("RM", 1)])}, defaults={"FG": "B"}))
+		self.assertEqual({r["item_code"]: r["action"] for r in out["lines"]}, {"FG": "Manufacture", "RM": "Purchase"})
+		self.assertTrue(any("no Procurement Type" in w for w in out["warnings"]))
+
+
+class TestSourceDocuments(unittest.TestCase):
+	def test_roots_travel_down_the_bom_and_merge(self):
+		items = {"FG": itm(buy=False, ptype="Manufacture"), "RM": itm(ptype="Purchase")}
+		ctx = Ctx(items, {"B": ("FG", 1, [child("RM", 2)])}, defaults={"FG": "B"})
+		out = e.run_mrp([
+			demand("FG", 1, date(2027, 3, 20), key="a", root="Sales Order SO-1"),
+			demand("FG", 1, date(2027, 3, 20), key="b", root="Production Plan PP-9"),
+		], ctx)
+		self.assertEqual(by(out["lines"], "FG")[0]["source_documents"], "Sales Order SO-1, Production Plan PP-9")
+		rm = by(out["lines"], "RM")[0]
+		self.assertEqual((rm["gross_qty"], rm["source_documents"]), (4, "Sales Order SO-1, Production Plan PP-9"))
+
+	def test_line_carries_uom_precision_flag_and_type(self):
+		it = itm(ptype="Purchase")
+		it["whole_number"] = True
+		line = e.run_mrp([demand("A", 2, date(2027, 3, 20))], Ctx({"A": it}))["lines"][0]
+		self.assertEqual((line["whole_number"], line["procurement_type"]), (1, "Purchase"))
 
 
 if __name__ == "__main__":

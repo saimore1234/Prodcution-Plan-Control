@@ -1,0 +1,93 @@
+{
+ "app": "ppc_production_control",
+ "charts": [],
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "idx": 0,
+ "is_hidden": 0,
+ "links": [],
+ "modified_by": "Administrator",
+ "module": "PPC Production Control",
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "restrict_to_domain": "",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "PPC Manager"
+  },
+  {
+   "role": "Production Planner"
+  },
+  {
+   "role": "Production Supervisor"
+  },
+  {
+   "role": "PPC Viewer"
+  }
+ ],
+ "title": "MRP Planning",
+ "name": "MRP Planning",
+ "label": "MRP Planning",
+ "icon": "list",
+ "sequence_id": 100,
+ "creation": "2026-10-30 09:00:00.000000",
+ "modified": "2026-10-30 09:00:00.000000",
+ "content": "[{\"id\": \"mp00\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>MRP Planning</b></span>\", \"col\": 12}}, {\"id\": \"mp01\", \"type\": \"paragraph\", \"data\": {\"text\": \"Material requirements from Sales Orders and Production Plans: review the recommendations, then create draft Material Requests and Work Orders.\", \"col\": 12}}, {\"id\": \"mp10\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Review\", \"col\": 3}}, {\"id\": \"mp11\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"New MRP Run\", \"col\": 3}}, {\"id\": \"mp12\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Runs\", \"col\": 3}}, {\"id\": \"mp13\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Dashboard\", \"col\": 3}}, {\"id\": \"mp14\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Item Wise\", \"col\": 3}}, {\"id\": \"mp15\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Warehouse Wise\", \"col\": 3}}, {\"id\": \"mp16\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"MRP Date Wise\", \"col\": 3}}, {\"id\": \"mp17\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"PPC Settings\", \"col\": 3}}]",
+ "shortcuts": [
+  {
+   "label": "MRP Review",
+   "link_to": "ppc-mrp-review",
+   "type": "Page",
+   "color": "Orange"
+  },
+  {
+   "label": "New MRP Run",
+   "link_to": "PPC MRP Run",
+   "type": "DocType",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Runs",
+   "link_to": "PPC MRP Run",
+   "type": "DocType",
+   "color": "Green"
+  },
+  {
+   "label": "MRP Dashboard",
+   "link_to": "ppc-mrp-dashboard",
+   "type": "Page",
+   "color": "Blue"
+  },
+  {
+   "label": "MRP Item Wise",
+   "link_to": "PPC MRP Item Wise",
+   "type": "Report",
+   "color": "Blue"
+  },
+  {
+   "label": "MRP Warehouse Wise",
+   "link_to": "PPC MRP Warehouse Wise",
+   "type": "Report",
+   "color": "Blue"
+  },
+  {
+   "label": "MRP Date Wise",
+   "link_to": "PPC MRP Date Wise",
+   "type": "Report",
+   "color": "Blue"
+  },
+  {
+   "label": "PPC Settings",
+   "link_to": "PPC Settings",
+   "type": "DocType",
+   "color": "Grey"
+  }
+ ]
+}

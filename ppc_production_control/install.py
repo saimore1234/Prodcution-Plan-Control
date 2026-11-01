@@ -196,10 +196,23 @@ CUSTOM_FIELDS.update(_recommendation_fields())
 
 # Which MRP Run created a draft Material Request / Work Order (shown on the document, never copied).
 for _doctype, _after in (("Material Request", "company"), ("Work Order", "company")):
-	CUSTOM_FIELDS.setdefault(_doctype, []).append(
+	CUSTOM_FIELDS.setdefault(_doctype, []).extend([
 		{"fieldname": "ppc_mrp_run", "label": "PPC MRP Run", "fieldtype": "Link", "options": "PPC MRP Run", "read_only": 1, "no_copy": 1,
-		 "allow_on_submit": 1, "insert_after": _after}
-	)
+		 "allow_on_submit": 1, "insert_after": _after},
+		{"fieldname": "ppc_source_documents", "label": "MRP Source Documents", "fieldtype": "Small Text", "read_only": 1, "no_copy": 1,
+		 "allow_on_submit": 1, "insert_after": "ppc_mrp_run", "description": "The Sales Orders / Production Plans this planned order serves."},
+	])
+CUSTOM_FIELDS.setdefault("Material Request Item", []).append(
+	{"fieldname": "ppc_source_documents", "label": "MRP Source Documents", "fieldtype": "Small Text", "read_only": 1, "no_copy": 1,
+	 "allow_on_submit": 1, "insert_after": "item_name"}
+)
+# What MRP does about a shortage of the item. Blank is allowed (existing items keep working: it is inferred from the BOM / purchase flag
+# and reported on the run); backfill_procurement_type() fills the blanks on request.
+CUSTOM_FIELDS.setdefault("Item", []).append(
+	{"fieldname": "ppc_procurement_type", "label": "Procurement Type", "fieldtype": "Select", "options": "\nPurchase\nManufacture",
+	 "insert_after": "is_purchase_item", "in_standard_filter": 1, "no_copy": 0,
+	 "description": "Purchase: MRP recommends a Material Request. Manufacture: MRP explodes the BOM and recommends a Work Order."}
+)
 
 # Fields of earlier iterations of this app; removed on migrate so no orphan columns remain.
 OBSOLETE_CUSTOM_FIELDS = {

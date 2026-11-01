@@ -38,6 +38,7 @@ doctype_js = {"Production Plan": "public/js/ppc_production_plan.js", "Sales Orde
 # "Production Control" group in the plan's Connections panel (Job Cards, audit log)
 override_doctype_dashboards = {
 	"Production Plan": "ppc_production_control.overrides.production_plan_dashboard.get_data",
+	"Sales Order": "ppc_production_control.overrides.sales_order_dashboard.get_data",
 }
 
 # Document Events
@@ -48,6 +49,8 @@ doc_events = {
 	"Sales Order": {
 		"validate": "ppc_production_control.events.sales_order_validate",
 		"before_update_after_submit": "ppc_production_control.events.sales_order_validate",
+		# Automatic MRP: only queues a background job; a failure never blocks or undoes the submit
+		"on_submit": "ppc_production_control.services.mrp_auto.on_sales_order_submit",
 	},
 	"Production Plan": {
 		"validate": "ppc_production_control.events.production_plan_validate",

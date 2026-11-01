@@ -26,6 +26,9 @@
   "rec_unavailable_tolerance_hours",
   "rec_single_machine",
   "rec_include_draft_wo",
+  "section_mrp",
+  "mrp_auto_on_sales_order",
+  "mrp_default_warehouse",
   "section_capabilities",
   "capability_roles"
  ],
@@ -173,6 +176,25 @@
    "label": "Count Draft Work Orders as Bookings",
    "default": "0",
    "description": "Draft Work Orders hold only placeholder times. Off (recommended): machines are judged on Job Cards, which hold the real schedule."
+  },
+  {
+   "fieldname": "section_mrp",
+   "fieldtype": "Section Break",
+   "label": "Material Planning (MRP)"
+  },
+  {
+   "fieldname": "mrp_auto_on_sales_order",
+   "fieldtype": "Check",
+   "label": "Calculate MRP when a Sales Order is submitted",
+   "default": "1",
+   "description": "Queues a background MRP run for the order. It only prepares recommendations for the MRP Review; nothing is created until a person confirms."
+  },
+  {
+   "fieldname": "mrp_default_warehouse",
+   "fieldtype": "Link",
+   "label": "Default Warehouse for Automatic MRP",
+   "options": "Warehouse",
+   "description": "Used for demand and components that name no warehouse. Empty = the Sales Order's own warehouse, then Stock Settings."
   },
   {
    "fieldname": "section_capabilities",

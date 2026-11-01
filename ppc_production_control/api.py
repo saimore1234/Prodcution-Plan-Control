@@ -539,18 +539,41 @@ def retry_failed_synchronizations(plan=None, job_card=None) -> dict:
 @frappe.whitelist(methods=["POST"])
 @guarded
 def mrp_calculate(run) -> dict:
-	"""Fetch demand, explode the BOMs, net against warehouse stock and store the recommendations on the run."""
+	"""Manual MRP: fetch demand, explode the BOMs, net against warehouse stock and store the recommendations on the run
+	(the same engine as the automatic calculation after a Sales Order is submitted)."""
 	return {"ok": True, **mrp.calculate(run)}
 
 
 @frappe.whitelist(methods=["POST"])
 @guarded
-def mrp_create_documents(run) -> dict:
-	"""Create draft Material Request / Work Orders from a calculated run (stock is re-checked; nothing is submitted)."""
-	return {"ok": True, **mrp.create_documents(run)}
+def mrp_create_documents(run, lines=None, confirm=0) -> dict:
+	"""Create draft Material Request / Work Orders from the reviewed recommendations. Needs `confirm=1` (the
+	reviewer's explicit confirmation); stock, supply and demand are re-checked; nothing is submitted."""
+	return {"ok": True, **mrp.create_documents(run, None if lines in (None, "") else as_list(lines), confirm)}
 
 
 @frappe.whitelist()
 @guarded
 def mrp_dashboard(company=None, run=None) -> dict:
 	return mrp.dashboard(company, run)
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_retry(run) -> dict:
+	"""Retry a failed (or stuck queued) MRP calculation - automatic runs included - with the same engine."""
+	return {"ok": True, **mrp.retry(run)}
+
+
+@frappe.whitelist()
+@guarded
+def mrp_review_data(run) -> dict:
+	"""Recommendations of a run for the MRP Review screen."""
+	return mrp.review_data(run)
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_save_review(run, lines) -> dict:
+	"""Store the reviewer's ticks and edited quantities (validated); creates nothing."""
+	return {"ok": True, **mrp.save_review(run, as_list(lines))}
