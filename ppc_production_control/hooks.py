@@ -46,6 +46,7 @@ override_doctype_dashboards = {
 # `doc_events` (not `override_doctype_class`) is used deliberately: other apps on the same site
 # commonly override Work Order / Job Card classes, and only one override can win.
 doc_events = {
+	"Item": {"validate": "ppc_production_control.services.item_rules.validate_item"},
 	"Sales Order": {
 		"validate": "ppc_production_control.events.sales_order_validate",
 		"before_update_after_submit": "ppc_production_control.events.sales_order_validate",
@@ -54,7 +55,10 @@ doc_events = {
 	},
 	"Production Plan": {
 		"validate": "ppc_production_control.events.production_plan_validate",
-		"on_submit": "ppc_production_control.events.production_plan_submitted",
+		"on_submit": [
+			"ppc_production_control.events.production_plan_submitted",
+			"ppc_production_control.services.mrp_auto.on_production_plan_submit",
+		],
 	},
 	"Work Order": {
 		"before_insert": "ppc_production_control.events.work_order_before_insert",
@@ -83,6 +87,7 @@ scheduler_events = {
 	"hourly": [
 		"ppc_production_control.tasks.refresh_active_plans",
 		"ppc_production_control.tasks.flag_unavailable_machine_plans",
+		"ppc_production_control.tasks.recover_stuck_mrp_runs",
 	],
 }
 

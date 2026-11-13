@@ -25,6 +25,13 @@ def refresh_active_plans():
 			frappe.log_error(title=f"PPC scheduled refresh failed for {plan}", message=frappe.get_traceback())
 
 
+def recover_stuck_mrp_runs():
+	"""Hourly: automatic MRP runs left "Queued" by a lost background job are calculated again (services/mrp_auto.py)."""
+	from ppc_production_control.services import mrp_auto
+
+	mrp_auto.recover_stuck_runs()
+
+
 def flag_unavailable_machine_plans():
 	"""Hourly: a Sales Order line whose preferred machine has since gone Off / Problem / Maintenance is marked Unavailable, and the order's
 	owner is told once. The recommendation is not silently changed - the planner recalculates it with Find Best Machine."""

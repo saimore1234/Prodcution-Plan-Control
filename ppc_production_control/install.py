@@ -12,6 +12,7 @@ from ppc_production_control.services.constants import (
 	PPC_ROLES,
 	SETTINGS_DT,
 )
+from ppc_production_control.services.settings_defaults import fill_missing_defaults
 
 CUSTOM_FIELDS = {
 	"Production Plan": [
@@ -209,7 +210,7 @@ CUSTOM_FIELDS.setdefault("Material Request Item", []).append(
 # What MRP does about a shortage of the item. Blank is allowed (existing items keep working: it is inferred from the BOM / purchase flag
 # and reported on the run); backfill_procurement_type() fills the blanks on request.
 CUSTOM_FIELDS.setdefault("Item", []).append(
-	{"fieldname": "ppc_procurement_type", "label": "Procurement Type", "fieldtype": "Select", "options": "\nPurchase\nManufacture",
+	{"fieldname": "custom_procurement_type", "label": "Procurement Type", "fieldtype": "Select", "options": "\nPurchase\nManufacture",
 	 "insert_after": "is_purchase_item", "in_standard_filter": 1, "no_copy": 0,
 	 "description": "Purchase: MRP recommends a Material Request. Manufacture: MRP explodes the BOM and recommends a Work Order."}
 )
@@ -276,7 +277,9 @@ def remove_obsolete_custom_fields():
 
 
 def ensure_settings():
-	"""Seed the capability table once; later edits by administrators are never overwritten."""
+	"""Seed the capability table once; later edits by administrators are never overwritten. MRP settings that have no stored
+	value yet get their recommended default (also never an overwrite)."""
+	fill_missing_defaults()
 	settings = frappe.get_single(SETTINGS_DT)
 	if settings.get("capability_roles"):
 		return
@@ -285,3 +288,9 @@ def ensure_settings():
 			settings.append("capability_roles", {"capability": capability, "role": role})
 	settings.flags.ignore_permissions = True
 	settings.save()
+
+# The Work Order of the parent item (MRP): a manufactured sub-assembly's planned Work Order points to the Work Order it feeds.
+CUSTOM_FIELDS.setdefault("Work Order", []).append(
+	{"fieldname": "ppc_parent_work_order", "label": "Parent Work Order (MRP)", "fieldtype": "Link", "options": "Work Order", "read_only": 1, "no_copy": 1,
+	 "allow_on_submit": 1, "insert_after": "ppc_source_documents"}
+)

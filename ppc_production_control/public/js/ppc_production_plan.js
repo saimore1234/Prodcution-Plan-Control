@@ -6,6 +6,18 @@
  *   pages, not on this form.
  */
 frappe.ui.form.on("Production Plan", {
+	// Automatic MRP for a submitted plan: the same dialog as for a Sales Order (it stays silent when MRP is off or not available)
+	on_submit(frm) {
+		frappe.require("/assets/ppc_production_control/js/ppc_mrp_review_ui.js", () => window.ppc_mrp && window.ppc_mrp.watch("Production Plan", frm.doc.name));
+	},
+
+	// a site that submits plans through a Workflow: the same dialog when an action has just submitted it
+	after_workflow_action(frm) {
+		if (frm.doc.docstatus === 1) {
+			frappe.require("/assets/ppc_production_control/js/ppc_mrp_review_ui.js", () => window.ppc_mrp && window.ppc_mrp.watch("Production Plan", frm.doc.name));
+		}
+	},
+
 	refresh(frm) {
 		if (frm.is_new() || frm.doc.docstatus === 0) return;
 		frappe.require(["ppc.bundle.css", "ppc_control.bundle.js"], () => frm.trigger("ppc_render"));

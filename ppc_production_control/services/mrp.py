@@ -19,8 +19,11 @@ What counts as what (so nothing is counted twice):
   that is *not* part of this run (the Bin's reserved qty beyond this run's own Sales Order lines) - so a
   run for one Sales Order does not spend stock that other open orders are waiting for.
 * Production coverage / pending supply: open Purchase Orders (ordered), open Material Requests
-  (indented), open Work Orders (planned) and every *draft* Purchase Material Request / Work Order,
-  which ERPNext does not count yet.
+  (indented) and open Work Orders (planned) - each switchable in PPC Settings - and **always** every
+  *draft* Purchase Material Request / Work Order, which ERPNext does not count yet. Supply that was made
+  for another open Sales Order (or Production Plan) is reserved for it and is not free for this run; a
+  document that serves this run's order *and* another one without a quantity split is not counted and is
+  reported (services/mrp_supply.py explains who a document is "for").
 """
 
 from collections import defaultdict
@@ -29,8 +32,21 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, now_datetime, nowdate
 
-from ppc_production_control.services import audit
-from ppc_production_control.services.constants import CAP_MANAGE_PLANS, CAP_VIEW, R_FAILED, R_SUCCESS
+from ppc_production_control.services import audit, mrp_supply
+from ppc_production_control.services.constants import (
+	A_MRP_POLICY,
+	AP_APPROVED,
+	AP_AWAITING,
+	AP_CANCELLED,
+	CAP_MANAGE_PLANS,
+	CAP_VIEW,
+	CLOSED_PLAN_STATUSES,
+	CLOSED_SO_STATUSES,
+	MRP_SETTING_DEFAULTS,
+	R_FAILED,
+	R_SUCCESS,
+	SETTINGS_DT,
+)
 from ppc_production_control.services.mrp_engine import (
 	ACTION_MANUFACTURE,
 	ACTION_PURCHASE,
@@ -43,8 +59,6 @@ from ppc_production_control.services.utils import commit_if_allowed
 
 RUN_DT = "PPC MRP Run"
 LINE_DT = "PPC MRP Line"
-CLOSED_SO_STATUSES = ("Closed", "On Hold", "Completed", "Cancelled")
-CLOSED_PLAN_STATUSES = ("Completed", "Closed", "Cancelled")
 S_DRAFT, S_QUEUED, S_CALCULATED, S_CREATED, S_FAILED = "Draft", "Queued", "Calculated", "Documents Created", "Failed"
 A_CALCULATE, A_AUTO, A_REVIEW, A_CREATE, A_RETRY, A_FAILED = (
 	"MRP Calculate", "MRP Auto Calculate", "MRP Review Saved", "MRP Create Documents", "MRP Retry", "MRP Calculation Failed",
@@ -54,6 +68,17 @@ CREATABLE = (ACTION_PURCHASE, ACTION_MANUFACTURE)
 
 
 # ============================================================================================ parameters
+def _setting(field, default=None):
+	"""A PPC Settings value; nothing stored means the recommended value of `MRP_SETTING_DEFAULTS` (unless a caller names another)."""
+	from ppc_production_control.services.mrp_auto import setting
+
+	return setting(field, MRP_SETTING_DEFAULTS[field] if default is None else default)
+
+
+def _horizon_days() -> int:
+	return cint(_setting("mrp_planning_horizon_days")) or MRP_SETTING_DEFAULTS["mrp_planning_horizon_days"]
+
+
 def params_of(run) -> dict:
 	"""The inputs of a run as a plain dict (also what the revalidation recalculates from)."""
 	sources = [(r.source_doctype, r.source_name) for r in run.get("sources") or [] if r.source_doctype and r.source_name]
@@ -61,12 +86,14 @@ def params_of(run) -> dict:
 		"name": run.name,
 		"company": run.company,
 		"from_date": getdate(run.from_date) if run.from_date else None,
-		"to_date": getdate(run.to_date) if run.to_date else getdate(add_days(nowdate(), 365)),
+		"to_date": getdate(run.to_date) if run.to_date else getdate(add_days(nowdate(), _horizon_days())),
+		"automatic": run.get("trigger") == "Automatic",
 		"include_sales_orders": cint(run.include_sales_orders),
 		"include_production_plans": cint(run.include_production_plans),
 		"default_warehouse": run.default_warehouse,
 		"warehouses": [r.warehouse for r in run.get("warehouses") or [] if r.warehouse],
 		"hours_per_day": flt(run.working_hours_per_day) or 8.0,
+		"default_only": _setting("mrp_warehouse_policy") == "Default Planning Warehouse",
 		"sales_orders": sorted({n for d, n in sources if d == "Sales Order"}),
 		"production_plans": sorted({n for d, n in sources if d == "Production Plan"}),
 	}
@@ -111,7 +138,7 @@ def fetch_demands(p: dict) -> tuple[list[dict], list[str]]:
 			if r.item_code in bundles:
 				skipped_bundle += 1
 				continue
-			wh = r.warehouse or p["default_warehouse"]
+			wh = _pick_warehouse(r.warehouse, p)
 			if allowed and wh not in allowed:
 				skipped_wh += 1
 				continue
@@ -135,10 +162,10 @@ def fetch_demands(p: dict) -> tuple[list[dict], list[str]]:
 			as_dict=True,
 		)
 		for r in rows:
-			if do_so and r.sales_order_item:
+			if (do_so and r.sales_order_item) or (p.get("automatic") and r.sales_order_item and _so_line_has_run(r.sales_order_item, p.get("name"))):
 				skipped_covered += 1  # the Sales Order line is the demand; counting the plan row too would double it
 				continue
-			wh = r.warehouse or p["default_warehouse"]
+			wh = _pick_warehouse(r.warehouse, p)
 			if allowed and wh not in allowed:
 				skipped_wh += 1
 				continue
@@ -157,6 +184,25 @@ def fetch_demands(p: dict) -> tuple[list[dict], list[str]]:
 	if explicit and not demands:
 		warnings.append(_("The listed documents have no open demand (not submitted, closed, fully delivered or in other warehouses)."))
 	return list(demands.values()), warnings
+
+
+def _pick_warehouse(own, p):
+	"""Warehouse Selection Policy: the line's own warehouse, or always the default planning warehouse."""
+	if p.get("default_only") and p.get("default_warehouse"):
+		return p["default_warehouse"]
+	return own or p["default_warehouse"]
+
+
+def _so_line_has_run(so_item: str, this_run: str | None) -> bool:
+	"""True when the Sales Order of this line already has its own (non-failed) MRP run: the plan row is that demand again."""
+	so = frappe.db.get_value("Sales Order Item", so_item, "parent")
+	if not so:
+		return False
+	return bool(frappe.db.sql(
+		"""select 1 from `tabPPC MRP Source` s join `tabPPC MRP Run` r on r.name = s.parent
+		where s.source_doctype = 'Sales Order' and s.source_name = %s and r.status != %s and r.name != %s limit 1""",
+		(so, S_FAILED, this_run or ""),
+	))
 
 
 def _demand(key, doctype, name, row_name, item, qty, uom, required, warehouse, bom_no) -> dict:
@@ -207,6 +253,14 @@ class SiteContext:
 			if d["source_doctype"] == "Sales Order":
 				self._own_so_qty[(d["item_code"], d["warehouse"] or self.default_warehouse)] += flt(d["qty"])
 		self.notes: set[str] = set()
+		self.use_safety = bool(_setting("mrp_include_safety_stock"))
+		self.use_incoming = bool(_setting("mrp_include_incoming_po"))
+		self.use_wo = bool(_setting("mrp_include_existing_wo"))
+		self.default_lead = cint(_setting("mrp_default_lead_time_days"))
+		self.default_only = _setting("mrp_warehouse_policy") == "Default Planning Warehouse"
+		# whose demand this run is: supply made for another open order is not free for it (see mrp_supply)
+		self._own_sources = {(d["source_doctype"], d["source_name"]) for d in demands}
+		self._supply_cache: dict = {}
 
 	# ---- items
 	def _whole_number(self, uom) -> int:
@@ -218,7 +272,7 @@ class SiteContext:
 		if code not in self._items:
 			row = frappe.db.get_value(
 				"Item", code,
-				["item_name", "stock_uom", "is_stock_item", "is_purchase_item", "lead_time_days", "disabled", "ppc_procurement_type"],
+				["item_name", "stock_uom", "is_stock_item", "is_purchase_item", "lead_time_days", "disabled", "custom_procurement_type", "safety_stock"],
 				as_dict=True,
 			)
 			self._items[code] = None if not row or row.disabled else {
@@ -226,8 +280,9 @@ class SiteContext:
 				"stock_uom": row.stock_uom,
 				"is_stock_item": cint(row.is_stock_item),
 				"is_purchase_item": cint(row.is_purchase_item),
-				"lead_time_days": cint(row.lead_time_days),
-				"procurement_type": row.ppc_procurement_type or "",
+				"lead_time_days": cint(row.lead_time_days) or self.default_lead,
+					"safety_stock": flt(row.safety_stock),
+				"procurement_type": row.custom_procurement_type or "",
 				"whole_number": self._whole_number(row.stock_uom),
 			}
 		return self._items[code]
@@ -272,22 +327,52 @@ class SiteContext:
 	# ---- stock position
 	def _leaves(self, warehouse) -> list[str]:
 		if warehouse not in self._wh_leaves:
-			wh = frappe.db.get_value("Warehouse", warehouse, ["is_group", "lft", "rgt"], as_dict=True)
-			if wh and wh.is_group:
-				self._wh_leaves[warehouse] = frappe.get_all("Warehouse", filters={"lft": [">=", wh.lft], "rgt": ["<=", wh.rgt], "is_group": 0}, pluck="name") or [warehouse]
-			else:
-				self._wh_leaves[warehouse] = [warehouse]
+			self._wh_leaves[warehouse] = leaf_warehouses(warehouse)
 		return self._wh_leaves[warehouse]
 
 	def position(self, item, warehouse):
 		key = (item, warehouse)
 		if key not in self._positions:
-			self._positions[key] = stock_position(item, self._leaves(warehouse), self._own_so_rows, self._own_so_qty.get(key, 0.0))
+			pos = stock_position(
+				item, self._leaves(warehouse), self._own_so_rows, self._own_so_qty.get(key, 0.0),
+				include_incoming=self.use_incoming, include_wo=self.use_wo,
+				own_sources=self._own_sources, notes=self.notes, cache=self._supply_cache,
+			)
+			if self.use_safety:
+				safety = flt((self.item(item) or {}).get("safety_stock"))
+				pos["stock"] = pos["stock"] - safety  # held back; may go negative, the engine floors usable stock at 0
+				pos["reserved_qty"] = pos["reserved_qty"] + safety
+			self._positions[key] = pos
 		return self._positions[key]
 
 
-def stock_position(item: str, warehouses: list[str], own_so_rows: list[str] | None = None, own_so_qty: float = 0.0) -> dict:
-	"""Usable stock and pending supply of one item in the given (leaf) warehouses, read live."""
+def leaf_warehouses(warehouse) -> list[str]:
+	"""A warehouse, or - for a group warehouse - the leaf warehouses below it (stock only lives in leaves)."""
+	wh = frappe.db.get_value("Warehouse", warehouse, ["is_group", "lft", "rgt"], as_dict=True)
+	if wh and wh.is_group:
+		return frappe.get_all("Warehouse", filters={"lft": [">=", wh.lft], "rgt": ["<=", wh.rgt], "is_group": 0}, pluck="name") or [warehouse]
+	return [warehouse]
+
+
+def stock_position(
+	item: str,
+	warehouses: list[str],
+	own_so_rows: list[str] | None = None,
+	own_so_qty: float = 0.0,
+	include_incoming: bool = True,
+	include_wo: bool = True,
+	own_sources: set | None = None,
+	notes: set | None = None,
+	cache: dict | None = None,
+) -> dict:
+	"""Usable stock and the supply that is *free for this run*, of one item in the given (leaf) warehouses, read live.
+
+	Stock: Bin actual qty less everything reserved (unchanged). Supply (`incoming`): the Bin's planned / indented / ordered quantity
+	(submitted Work Orders, Material Requests, Purchase Orders) according to the two Include settings, **plus every draft Work Order
+	and draft purchase Material Request whatever those settings say** (ERPNext's Bin does not count drafts, and ignoring them is how
+	the same shortage gets planned twice), **minus** the supply that belongs to other open orders or to an ambiguous mixture
+	(`mrp_supply.allocation`, only when `own_sources` - the demand sources of this run - are known). Only what was counted is
+	subtracted, each document row once, so nothing is counted or removed twice; stock is never touched by the allocation."""
 	bins = frappe.db.sql(
 		"""select coalesce(sum(actual_qty), 0) actual, coalesce(sum(reserved_qty), 0) res_so,
 			coalesce(sum(reserved_qty_for_production), 0) res_prod,
@@ -316,13 +401,28 @@ def stock_position(item: str, warehouses: list[str], own_so_rows: list[str] | No
 		)[0][0]
 	)
 	reserved = flt(bins.res_prod) + flt(bins.res_sub) + reserved_other + other_orders
-	incoming = flt(bins.ordered) + flt(bins.indented) + flt(bins.planned) + draft_mr + draft_wo
+	incoming = draft_mr + draft_wo  # drafts always count: the Include settings only decide about the submitted documents in the Bin
+	if include_incoming:
+		incoming += flt(bins.ordered) + flt(bins.indented)
+	if include_wo:
+		incoming += flt(bins.planned)
+
+	alloc = mrp_supply.allocation(item, warehouses, own_sources, include_incoming=include_incoming, include_wo=include_wo, cache=cache)
+	incoming = max(0.0, incoming - alloc["reserved"] - alloc["ambiguous"])
+	if notes is not None:
+		if alloc["reserved"]:
+			docs = ", ".join(f"{dt} {name}" for dt, name, _q in alloc["reserved_docs"][:4]) + (" ..." if len(alloc["reserved_docs"]) > 4 else "")
+			notes.add(_("{0}: {1} of pending supply belongs to other open orders and is not counted ({2}).").format(item, flt(alloc["reserved"], 3), docs))
+		for dt, name, owners in alloc["ambiguous_docs"]:
+			notes.add(_("{0} {1} serves several orders ({2}) and has no quantity split, so it is not counted as free supply of {3}. Review it.").format(dt, name, ", ".join(owners), item))
 	return {
 		"stock": flt(bins.actual) - reserved,
 		"incoming": incoming,
 		"actual_qty": flt(bins.actual),
 		"reserved_qty": reserved,
 		"incoming_qty": incoming,
+		"supply_reserved_for_others": alloc["reserved"],
+		"supply_ambiguous": alloc["ambiguous"],
 	}
 
 
@@ -355,22 +455,55 @@ def compute(p: dict) -> dict:
 	return {"demands": demands, "lines": result["lines"], "warnings": warnings, "summary": summarize(demands, result["lines"])}
 
 
+def approval_model_ready() -> bool:
+	"""True once the site has the review / approval fields of 1.7.x (a `bench migrate` added them). Everything that reads or writes them
+	asks first, so the same app code stays harmless on a site that has not been migrated yet."""
+	return bool(frappe.get_meta(RUN_DT).has_field("approval_status"))
+
+
+def approval_state(run) -> str:
+	"""Awaiting Review / Approved / Cancelled of a run, also for runs that predate the approval fields (derived from their status)."""
+	explicit = run.get("approval_status")
+	if explicit:
+		return explicit
+	if run.status == S_CREATED:
+		return AP_APPROVED
+	return AP_AWAITING if run.status == S_CALCULATED else ""
+
+
+def is_cancelled(run_name: str) -> bool:
+	return approval_model_ready() and frappe.db.get_value(RUN_DT, run_name, "approval_status") == AP_CANCELLED
+
+
+def reviewable(run) -> bool:
+	"""A calculated run nobody has approved or cancelled yet: the only state in which recommendations may still change."""
+	return run.status == S_CALCULATED and approval_state(run) == AP_AWAITING
+
+
 def calculate(run_name: str) -> dict:
 	"""Manual calculation: permission-checked, then the shared engine."""
 	require_capability(CAP_MANAGE_PLANS)
 	check_doc_permission(RUN_DT, run_name, "write")
-	return calculate_run(run_name, automatic=False)
+	out = calculate_run(run_name, automatic=False)
+	if _setting("mrp_review_mode") == "Automatic":
+		if not (frappe.has_permission("Material Request", "create") and frappe.has_permission("Work Order", "create")):
+			frappe.throw(_("Review Mode is Automatic: you need permission to create Material Requests and Work Orders."), frappe.PermissionError)
+		out["documents"] = create_documents_auto(run_name, policy=_("Review Mode: Automatic"))
+	return out
 
 
-def calculate_run(run_name: str, *, automatic: bool = False) -> dict:
+def calculate_run(run_name: str, *, automatic: bool = False, reopen: bool = False) -> dict:
 	"""THE calculation: (re)calculate a run and store demand lines and recommendations on it.
 
 	Called by the manual button / API and by the automatic Sales Order job, with identical results; only
-	the permission check (done by the caller) and the audit action differ."""
+	the permission check (done by the caller) and the audit action differ. A cancelled review is only calculated
+	again when the caller says `reopen` (the Recalculate action); a new calculation always starts the review afresh."""
 	frappe.db.get_value(RUN_DT, run_name, "name", for_update=True)  # row lock: two clicks / jobs cannot calculate at once
 	run = frappe.get_doc(RUN_DT, run_name)
 	if run.status == S_CREATED:
 		frappe.throw(_("Documents were already created from this run. Start a new run instead of recalculating it."))
+	if run.get("approval_status") == AP_CANCELLED and not reopen:
+		frappe.throw(_("This review was cancelled. Use Recalculate to reopen it."))
 	p = params_of(run)
 	if not p["default_warehouse"]:
 		frappe.throw(_("Select a default warehouse (or set one in PPC Settings for automatic runs)."))
@@ -392,6 +525,9 @@ def calculate_run(run_name: str, *, automatic: bool = False) -> dict:
 				"sources", "source_documents", "note", "actual_qty", "reserved_qty", "incoming_qty")},
 			create_document=1 if creatable else 0,
 			approved_qty=r["net_qty"] if creatable else 0,
+			original_qty=r["net_qty"] if creatable else 0,  # what the calculation recommended; a reviewer's revision never overwrites it
+			skip_reason=None,
+			revised_by=None,
 		))
 	for k, v in result["summary"].items():
 		run.set(k, v)
@@ -400,6 +536,10 @@ def calculate_run(run_name: str, *, automatic: bool = False) -> dict:
 	run.calculated_by = frappe.session.user
 	run.warnings = "\n".join(result["warnings"])
 	run.error_message = None
+	# every (re)calculation starts the review afresh: earlier revisions, skips and a cancellation belong to the old recommendations
+	for k in ("reviewed_by", "reviewed_on", "approved_by", "approved_on", "approval_key", "cancel_reason", "automation_policy"):
+		run.set(k, None)
+	run.set("approval_status", AP_AWAITING)
 	run.flags.ignore_permissions = automatic
 	run.save()
 	audit.log(A_AUTO if automatic else A_CALCULATE, R_SUCCESS, details={"run": run.name, "trigger": run.get("trigger"), **result["summary"]})
@@ -452,25 +592,31 @@ def _already_converted_warnings(run_name: str, demands: list[dict]) -> list[str]
 
 # ============================================================================================ MRP Review
 def review_data(run_name: str) -> dict:
-	"""Everything the MRP Review screen shows for one run."""
+	"""Everything the MRP Review screen (and the dialog after a Sales Order is submitted) shows for one run. The keys of 1.7.0 are all
+	still here; the approval state, KPIs, stock / supply / BOM details and the history are added by `mrp_approval.review_extras`."""
 	require_capability(CAP_VIEW)
 	check_doc_permission(RUN_DT, run_name, "read")
 	run = frappe.get_doc(RUN_DT, run_name)
-	can_edit = run.status == S_CALCULATED and bool(frappe.has_permission(RUN_DT, "write", doc=run))
+	can_edit = reviewable(run) and bool(frappe.has_permission(RUN_DT, "write", doc=run))
 	fields = ("name", "idx", "item_code", "item_name", "warehouse", "required_date", "planned_order_date", "is_late", "action", "procurement_type",
 		"gross_qty", "from_stock", "from_supply", "net_qty", "approved_qty", "uom", "whole_number", "create_document", "source_documents",
-		"note", "document_type", "document", "status", "bom_no", "level")
+		"note", "document_type", "document", "status", "bom_no", "level", "original_qty", "skip_reason", "revised_by")
 	lines = []
 	for r in run.lines:
 		row = {f: r.get(f) for f in fields}
 		row["editable"] = bool(can_edit and r.action in CREATABLE and flt(r.net_qty) > 0 and not r.document)
 		lines.append(row)
-	return {
+	data = {
 		"run": run.name, "status": run.status, "company": run.company, "trigger": run.get("trigger"), "source_sales_order": run.get("source_sales_order"),
 		"calculated_on": run.calculated_on, "warnings": [w for w in (run.warnings or "").split("\n") if w], "error_message": run.error_message,
 		"material_request": run.material_request, "can_edit": can_edit, "can_retry": run.status in (S_FAILED, S_QUEUED),
 		"max_edit_factor": MAX_EDIT_FACTOR, "lines": lines,
+		"approval_status": approval_state(run), "token": str(run.modified),
 	}
+	from ppc_production_control.services import mrp_approval  # imported here: mrp_approval itself builds on this module
+
+	data.update(mrp_approval.review_extras(run, data))
+	return data
 
 
 def _validate_selection(run, selections: list[dict]):
@@ -502,6 +648,9 @@ def _validate_selection(run, selections: list[dict]):
 				errors.append(_("{0}: the quantity may not exceed {1} times the shortage ({2}).").format(label, MAX_EDIT_FACTOR, flt(row.net_qty)))
 				continue
 			row.approved_qty = flt(qty, 6)
+			# a quantity that differs from the recommendation is a revision: say by whom (the recommendation stays in Original Quantity)
+			row.revised_by = frappe.session.user if abs(flt(qty) - (flt(row.original_qty) or flt(row.net_qty))) > 1e-9 else None
+			row.skip_reason = None  # a line that is wanted again is not skipped any more
 		row.create_document = wanted
 	if errors:
 		frappe.throw("<br>".join(errors), frappe.ValidationError)
@@ -515,6 +664,8 @@ def save_review(run_name: str, selections) -> dict:
 	run = frappe.get_doc(RUN_DT, run_name)
 	if run.status != S_CALCULATED:
 		frappe.throw(_("Only a calculated run can be reviewed (this one is {0}).").format(_(run.status)))
+	if not reviewable(run):
+		frappe.throw(_("This review is {0}; it can no longer be changed.").format(_(approval_state(run))))
 	_validate_selection(run, selections)
 	run.save()
 	chosen = [r for r in run.lines if cint(r.create_document)]
@@ -540,6 +691,8 @@ def create_documents(run_name: str, selections=None, confirm=0) -> dict:
 		frappe.throw(_("Documents were already created from this run."))
 	if run.status != S_CALCULATED:
 		frappe.throw(_("Calculate the run before creating documents."))
+	if not reviewable(run):
+		frappe.throw(_("This review is {0}; no documents can be created from it.").format(_(approval_state(run))))
 	if not frappe.has_permission("Material Request", "create") or not frappe.has_permission("Work Order", "create"):
 		frappe.throw(_("You need permission to create Material Requests and Work Orders."), frappe.PermissionError)
 	if selections is not None:
@@ -547,7 +700,49 @@ def create_documents(run_name: str, selections=None, confirm=0) -> dict:
 	chosen = [r for r in run.lines if cint(r.create_document) and r.action in CREATABLE and flt(r.net_qty) > 0 and not r.document]
 	if not chosen:
 		frappe.throw(_("Select at least one recommendation to create."))
+	return _create_from(run, run_name, chosen, automatic=False, approval=approval_stamp())
 
+
+def approval_stamp(**extra) -> dict:
+	"""The approval fields written together with the draft documents (same transaction): who approved and when."""
+	now, user = now_datetime(), frappe.session.user
+	return {"approval_status": AP_APPROVED, "approved_by": user, "approved_on": now, "reviewed_by": user, "reviewed_on": now, **extra}
+
+
+def automation_policy_text(policy: str) -> str:
+	"""Which automation policy created the documents, and who switched it on (recorded by PPC Settings when it is saved)."""
+	meta = frappe.get_meta(SETTINGS_DT)
+	by = frappe.db.get_single_value(SETTINGS_DT, "mrp_policy_set_by") if meta.has_field("mrp_policy_set_by") else None
+	on = frappe.db.get_single_value(SETTINGS_DT, "mrp_policy_set_on") if by else None
+	if by:
+		return _("{0}, switched on by {1} on {2}").format(policy, by, str(on)[:19])
+	return _("{0} (switched on before the policy was recorded)").format(policy)
+
+
+def create_documents_auto(run_name: str, policy: str | None = None) -> dict | None:
+	"""Automatic path: the same re-validation and creation as the confirmed manual one, for the lines the engine ticked.
+	Runs without a user (permissions ignored), only on a Calculated run that is still awaiting review, and is a no-op when
+	nothing is creatable - so a retry or a repeated job never creates anything twice (lines that already have a document are
+	skipped). It only exists because an administrator switched an automation policy on: the run records that policy (and who
+	enabled it) instead of a reviewer, and the execution is audited. Nothing is ever submitted."""
+	frappe.db.get_value(RUN_DT, run_name, "name", for_update=True)
+	run = frappe.get_doc(RUN_DT, run_name)
+	if run.status != S_CALCULATED or not reviewable(run):
+		return None
+	chosen = [r for r in run.lines if cint(r.create_document) and r.action in CREATABLE and flt(r.net_qty) > 0 and not r.document]
+	if not chosen:
+		return None
+	policy_text = automation_policy_text(policy or _("Automatic Draft Creation"))
+	out = _create_from(run, run_name, chosen, automatic=True, approval={"approval_status": AP_APPROVED, "approved_on": now_datetime(), "automation_policy": policy_text})
+	if out and out.get("created") and approval_model_ready():
+		audit.log(A_MRP_POLICY, R_SUCCESS, details={
+			"run": run_name, "policy": policy_text, "created": out["created"], "skipped": out["skipped"],
+			"source": [(d.source_doctype, d.source_name) for d in run.get("sources") or []],
+		})
+	return out
+
+
+def _create_from(run, run_name, chosen, automatic: bool, approval: dict | None = None) -> dict:
 	fresh = compute(params_of(run))
 	fresh_net: dict[tuple, float] = defaultdict(float)
 	for r in fresh["lines"]:
@@ -569,24 +764,35 @@ def create_documents(run_name: str, selections=None, confirm=0) -> dict:
 			row.status = _("Reduced to {0}: stock or supply changed").format(qty)
 		(buy if row.action == ACTION_PURCHASE else make).append((row, qty))
 
+	if not buy and not make:
+		run.flags.ignore_permissions = automatic
+		run.save()
+		return {"run": run_name, "created": [], "skipped": skipped, "status": run.status, "demand_gone": vanished}
+
 	savepoint = "ppc_mrp_create"
 	frappe.db.savepoint(savepoint)
 	try:
 		created = []
 		if buy:
-			mr = _make_material_request(run, buy)
+			mr = _make_material_request(run, buy, automatic)
 			created.append(("Material Request", mr.name))
 			for row, _qty in buy:
 				row.document_type, row.document = "Material Request", mr.name
 				row.status = row.status or _("Draft created")
 			run.material_request = mr.name
-		for row, qty in make:
-			wo = _make_work_order(run, row, qty)
+		wo_by_item: dict[str, str] = {}
+		for row, qty in make:  # lines are ordered parents first, so a sub-assembly finds its parent Work Order
+			parent = next((wo_by_item[s.strip()] for s in (row.sources or "").split(",") if s.strip() in wo_by_item), None)
+			wo = _make_work_order(run, row, qty, automatic, parent)
+			wo_by_item.setdefault(row.item_code, wo.name)
 			created.append(("Work Order", wo.name))
 			row.document_type, row.document = "Work Order", wo.name
 			row.status = row.status or _("Draft created")
 		if created:
 			run.status = S_CREATED
+			for k, v in (approval or {}).items():  # who approved (or which policy did) - saved in the same transaction as the documents
+				run.set(k, v)
+		run.flags.ignore_permissions = automatic
 		run.save()
 	except Exception as e:
 		frappe.db.rollback(save_point=savepoint)
@@ -601,7 +807,7 @@ def _source_text(rows) -> str:
 	return ", ".join(seen[:12]) + (f" (+{len(seen) - 12} more)" if len(seen) > 12 else "")
 
 
-def _make_material_request(run, buy: list[tuple]):
+def _make_material_request(run, buy: list[tuple], automatic: bool = False):
 	mr = frappe.new_doc("Material Request")
 	mr.material_request_type = "Purchase"
 	mr.company = run.company
@@ -615,11 +821,12 @@ def _make_material_request(run, buy: list[tuple]):
 			"warehouse": row.warehouse, "schedule_date": max(getdate(nowdate()), getdate(row.planned_order_date or row.required_date)),
 			"ppc_source_documents": row.source_documents,
 		})
+	mr.flags.ignore_permissions = automatic
 	mr.insert()
 	return mr
 
 
-def _make_work_order(run, row, qty):
+def _make_work_order(run, row, qty, automatic: bool = False, parent_work_order: str | None = None):
 	settings = frappe.get_cached_doc("Manufacturing Settings")
 	wo = frappe.new_doc("Work Order")
 	wo.company = run.company
@@ -633,6 +840,8 @@ def _make_work_order(run, row, qty):
 	wo.planned_start_date = f"{getdate(row.planned_order_date or row.required_date)} 00:00:00"
 	wo.ppc_mrp_run = run.name
 	wo.ppc_source_documents = row.source_documents
+	wo.ppc_parent_work_order = parent_work_order
+	wo.flags.ignore_permissions = automatic
 	wo.insert()
 	return wo
 
@@ -721,7 +930,7 @@ def backfill_procurement_type(dry_run: int = 1, only: list[str] | None = None) -
 	    bench --site <site> execute ppc_production_control.services.mrp.backfill_procurement_type --kwargs "{'dry_run': 0}"
 	"""
 	boms = set(frappe.get_all("BOM", filters={"is_default": 1, "is_active": 1, "docstatus": 1}, pluck="item"))
-	filters = {"disabled": 0, "ppc_procurement_type": ["in", ["", None]]}
+	filters = {"disabled": 0, "custom_procurement_type": ["in", ["", None]]}
 	if only:
 		filters["name"] = ["in", only]
 	items = frappe.get_all("Item", filters=filters, fields=["name", "is_purchase_item"])
@@ -732,6 +941,78 @@ def backfill_procurement_type(dry_run: int = 1, only: list[str] | None = None) -
 	if not cint(dry_run):
 		for kind in ("Manufacture", "Purchase"):
 			for name in plan[kind]:
-				frappe.db.set_value("Item", name, "ppc_procurement_type", kind, update_modified=False)
+				frappe.db.set_value("Item", name, "custom_procurement_type", kind, update_modified=False)
 		commit_if_allowed()
 	return {"dry_run": bool(cint(dry_run)), **{k: len(v) for k, v in plan.items()}, "sample": {k: v[:5] for k, v in plan.items()}}
+
+
+# ============================================================================================ overview (all runs)
+def overview(filters=None) -> dict:
+	"""Cross-run KPIs for the MRP dashboard, straight from the database. Filters: company, warehouse, from_date, to_date, item,
+	procurement_type, status, source (a Sales Order / Production Plan name). Runs that failed or are only queued have no lines."""
+	require_capability(CAP_VIEW)
+	f = frappe._dict(filters or {})
+	run_cond, args = ["1=1"], {}
+	for field, col in (("company", "r.company"), ("status", "r.status")):
+		if f.get(field):
+			run_cond.append(f"{col} = %({field})s")
+			args[field] = f[field]
+	if f.get("from_date"):
+		run_cond.append("date(r.creation) >= %(from_date)s")
+		args["from_date"] = f.from_date
+	if f.get("to_date"):
+		run_cond.append("date(r.creation) <= %(to_date)s")
+		args["to_date"] = f.to_date
+	if f.get("source"):
+		run_cond.append("exists (select 1 from `tabPPC MRP Source` s where s.parent = r.name and s.source_name = %(source)s)")
+		args["source"] = f.source
+	where_run = " and ".join(run_cond)
+	line_cond = []
+	for field, col in (("warehouse", "l.warehouse"), ("item", "l.item_code"), ("procurement_type", "l.procurement_type")):
+		if f.get(field):
+			line_cond.append(f"{col} = %({field})s")
+			args[field] = f[field]
+	where_line = (" and " + " and ".join(line_cond)) if line_cond else ""
+
+	runs = frappe.db.sql(f"select r.name, r.status from `tabPPC MRP Run` r where {where_run}", args, as_dict=True)
+	names = tuple(r.name for r in runs) or ("",)
+	args["runs"] = names
+	by_status: dict[str, int] = defaultdict(int)
+	for r in runs:
+		by_status[r.status] += 1
+	demand = {
+		d.source_doctype: flt(d.q)
+		for d in frappe.db.sql(
+			"select source_doctype, sum(qty) q from `tabPPC MRP Demand` where parent in %(runs)s group by source_doctype", args, as_dict=True
+		)
+	}
+	line = frappe.db.sql(
+		f"""select coalesce(sum(case when l.net_qty > 0 then l.net_qty end), 0) shortage,
+			coalesce(sum(case when l.net_qty > 0 and l.action = 'Purchase' then l.net_qty end), 0) purchase,
+			coalesce(sum(case when l.net_qty > 0 and l.action = 'Manufacture' then l.net_qty end), 0) manufacture,
+			coalesce(sum(l.net_qty > 0 and l.is_late = 1), 0) overdue
+		from `tabPPC MRP Line` l where l.parent in %(runs)s {where_line}""",
+		args, as_dict=True,
+	)[0]
+	drafts = {
+		dt: frappe.db.count(dt, {"ppc_mrp_run": ["in", list(names)], "docstatus": 0})
+		for dt in ("Material Request", "Work Order")
+	}
+	missing_type = frappe.db.count("Item", {"disabled": 0, "is_stock_item": 1, "custom_procurement_type": ["in", ["", None]]})
+	manufacture_items = frappe.get_all("Item", filters={"disabled": 0, "custom_procurement_type": "Manufacture"}, pluck="name")
+	with_bom = set(frappe.get_all("BOM", filters={"is_active": 1, "docstatus": 1, "item": ["in", manufacture_items or [""]]}, pluck="item"))
+	return {
+		"active_runs": by_status[S_CALCULATED] + by_status[S_QUEUED],
+		"runs_by_status": dict(by_status),
+		"sales_order_demand_qty": flt(demand.get("Sales Order")),
+		"production_plan_demand_qty": flt(demand.get("Production Plan")),
+		"shortage_qty": flt(line.shortage),
+		"purchase_requirement_qty": flt(line.purchase),
+		"manufacturing_requirement_qty": flt(line.manufacture),
+		"draft_material_requests": drafts["Material Request"],
+		"draft_work_orders": drafts["Work Order"],
+		"failed_runs": by_status[S_FAILED],
+		"items_missing_procurement_type": missing_type,
+		"items_missing_bom": len([i for i in manufacture_items if i not in with_bom]),
+		"overdue_requirements": cint(line.overdue),
+	}

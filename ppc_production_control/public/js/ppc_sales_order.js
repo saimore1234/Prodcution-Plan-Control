@@ -181,6 +181,21 @@
 	}
 
 	frappe.ui.form.on("Sales Order", {
+		// Automatic MRP: right after a successful submit show "Calculating…" and then the review (services/mrp_approval.py decides whether
+		// there is anything to show - it answers "not enabled" for users without a PPC role, with automatic MRP off, or on a site that
+		// has not been migrated - and the submit itself is never disturbed).
+		on_submit(frm) {
+			frappe.require("/assets/ppc_production_control/js/ppc_mrp_review_ui.js", () => window.ppc_mrp && window.ppc_mrp.watch("Sales Order", frm.doc.name));
+		},
+
+		// A site that submits through a Workflow (an "Approve" action that reaches the submitted state) never fires on_submit: the same
+		// dialog opens when such an action has just submitted the order. (The dialog opens once per document, whichever event comes first.)
+		after_workflow_action(frm) {
+			if (frm.doc.docstatus === 1) {
+				frappe.require("/assets/ppc_production_control/js/ppc_mrp_review_ui.js", () => window.ppc_mrp && window.ppc_mrp.watch("Sales Order", frm.doc.name));
+			}
+		},
+
 		refresh(frm) {
 			const attention = (frm.doc.items || []).filter((r) => ["Stale", "Unavailable", "Incomplete Data"].includes(r.ppc_recommendation_status));
 			if (attention.length) {

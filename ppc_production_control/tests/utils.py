@@ -5,9 +5,17 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, add_to_date, flt, now_datetime, nowdate
 
-from ppc_production_control.services.constants import PLAN_DT
+from ppc_production_control.services.constants import MRP_SETTING_DEFAULTS, PLAN_DT
 
 PREFIX = "PPCT"  # every test master is named PPCT-...
+
+
+def use_mrp_settings(**overrides):
+	"""Give every MRP setting an explicit value for this test: the recommended defaults, then the overrides. A test must never depend
+	on whatever the site's administrators happened to save (that is how a copy of a real site failed 18 of 71 MRP tests). The
+	writes live in the test's savepoint and are rolled back with it."""
+	for field, value in {**MRP_SETTING_DEFAULTS, **overrides}.items():
+		frappe.db.set_single_value("PPC Settings", field, value)
 
 
 def get_company() -> str:

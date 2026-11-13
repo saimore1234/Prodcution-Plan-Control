@@ -17,13 +17,14 @@ from ppc_production_control.tests.utils import (
 	make_plan,
 	make_sales_order,
 	make_warehouse,
+	use_mrp_settings,
 )
 
 P = f"{PREFIX}-MRP"
 
 
 def set_type(item, ptype):
-	frappe.db.set_value("Item", item, "ppc_procurement_type", ptype)
+	frappe.db.set_value("Item", item, "custom_procurement_type", ptype)
 
 
 class MRPTestCase(PPCTestCase):
@@ -45,6 +46,10 @@ class MRPTestCase(PPCTestCase):
 		for item in (cls.mfg, cls.sub, cls.rma, cls.rmp, cls.buy):
 			frappe.db.delete("Bin", {"item_code": item})
 		frappe.flags.ppc_mrp_auto_in_test = False
+
+	def setUp(self):
+		super().setUp()
+		use_mrp_settings()  # the recommended settings, whatever the site saved (rolled back with the test's savepoint)
 
 	def so(self, lines=None, **kw):
 		return make_sales_order(self.company, self.customer, lines or [(self.mfg, 10)], warehouse=self.wh, **kw)
@@ -70,7 +75,7 @@ class MRPTestCase(PPCTestCase):
 
 class TestProcurementAndExplosion(MRPTestCase):
 	def test_item_has_a_procurement_type_field_with_both_options(self):
-		df = frappe.get_meta("Item").get_field("ppc_procurement_type")
+		df = frappe.get_meta("Item").get_field("custom_procurement_type")
 		self.assertIsNotNone(df)
 		self.assertEqual([o for o in df.options.split("\n") if o], ["Purchase", "Manufacture"])
 
@@ -111,9 +116,9 @@ class TestProcurementAndExplosion(MRPTestCase):
 		out = mrp.backfill_procurement_type(only=[self.buy])
 		self.assertTrue(out["dry_run"])
 		self.assertEqual(out["Purchase"], 1)
-		self.assertEqual(frappe.db.get_value("Item", self.buy, "ppc_procurement_type") or "", "")
+		self.assertEqual(frappe.db.get_value("Item", self.buy, "custom_procurement_type") or "", "")
 		mrp.backfill_procurement_type(dry_run=0, only=[self.buy])
-		self.assertEqual(frappe.db.get_value("Item", self.buy, "ppc_procurement_type"), "Purchase")
+		self.assertEqual(frappe.db.get_value("Item", self.buy, "custom_procurement_type"), "Purchase")
 
 	def test_every_line_names_the_sales_order_it_serves(self):
 		so = self.so()

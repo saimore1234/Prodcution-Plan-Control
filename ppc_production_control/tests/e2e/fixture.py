@@ -356,3 +356,108 @@ def cleanup() -> dict:
 		)
 	}
 	return {"left": {k: v for k, v in left.items() if v}, "clean": not any(left.values()), "problems": problems}
+
+
+# ---- MRP review / approval dialog (ppc_mrp_popup_e2e.js) -------------------------------------------------------------------------
+MRP_FG, MRP_RM, MRP_BUY = f"{P}-MRP-FG", f"{P}-MRP-RM", f"{P}-MRP-BUY"
+MRP_SETTINGS = ("mrp_enabled", "mrp_auto_on_sales_order", "mrp_auto_create_drafts", "mrp_review_mode")
+
+
+def mrp_setup(count: int = 4) -> dict:
+	"""A manufactured item (BOM: 2 x a purchased component), a plain purchased item and `count` DRAFT Sales Orders the browser submits.
+	Nothing here changes a site setting: if the site's MRP settings are not the recommended ones the fixture refuses (set them first)."""
+	_admin()
+	have = {f: frappe.db.sql("select value from `tabSingles` where doctype='PPC Settings' and field=%s", f) for f in MRP_SETTINGS}
+	have = {f: (v[0][0] if v else None) for f, v in have.items()}
+	wanted = {"mrp_enabled": {"1", None}, "mrp_auto_on_sales_order": {"1", None}, "mrp_auto_create_drafts": {"0", None}, "mrp_review_mode": {"Review First", None}}
+	bad = {f: v for f, v in have.items() if v not in wanted[f]}
+	if bad:
+		frappe.throw(f"PPC Settings are not the recommended ones ({bad}); the e2e fixture will not change them.")
+	company = frappe.conf.get("ppc_e2e_company") or frappe.db.get_single_value("Global Defaults", "default_company")
+	fg_wh = frappe.db.get_single_value("Manufacturing Settings", "default_fg_warehouse")
+	if not fg_wh or not frappe.db.get_single_value("Manufacturing Settings", "default_wip_warehouse"):
+		frappe.throw("Manufacturing Settings has no default WIP / FG warehouse; the e2e test will not change site settings.")
+	fg, rm, buy = U.make_item(MRP_FG, manufacture=True), U.make_item(MRP_RM), U.make_item(MRP_BUY)
+	for item, ptype in ((fg, "Manufacture"), (rm, "Purchase"), (buy, "Purchase")):
+		frappe.db.set_value("Item", item, "custom_procurement_type", ptype)
+	for item in (fg, rm, buy):
+		frappe.db.delete("Bin", {"item_code": item, "actual_qty": 0})
+	U.make_bom(fg, company, [(rm, 2)])
+	customer = U.make_customer(f"{P} Customer")
+	orders = [U.make_sales_order(company, customer, [(fg, 10), (buy, 6)], warehouse=fg_wh, delivery_in_days=30, submit=False).name for _ in range(int(count))]
+	users("create")
+	# this test submits Sales Orders in the browser. A site may route that through a Workflow ("Sales Order approval": Draft -> Pending Approval L1
+	# -> Approved by a Director): give the test manager the roles that workflow asks for, if they exist on the site.
+	manager = frappe.get_doc("User", MANAGER)
+	for role in ("Sales Manager", "Director"):
+		if frappe.db.exists("Role", role) and role not in [r.role for r in manager.roles]:
+			manager.append("roles", {"role": role})
+	manager.flags.ignore_permissions = True
+	manager.save()
+	frappe.db.commit()
+	return {"company": company, "sales_orders": orders, "fg": fg, "rm": rm, "buy": buy, "warehouse": fg_wh}
+
+
+def mrp_run_job(doctype: str, name: str) -> dict:
+	"""Stand in for the background worker: run the automatic MRP job of a submitted document (what `bench worker` would do)."""
+	from ppc_production_control.services import mrp_auto
+
+	_admin()
+	mrp_auto.run_for_source(doctype, name)
+	frappe.db.commit()
+	return mrp_state(name)
+
+
+def mrp_state(sales_order: str) -> dict:
+	"""What the database says about the run of a Sales Order and the documents made from it."""
+	_admin()
+	run = frappe.db.get_value("PPC MRP Run", {"source_sales_order": sales_order}, ["name", "status", "approval_status", "approved_by", "approval_key", "cancel_reason"], as_dict=True)
+	if not run:
+		return {"run": None}
+	docs = [{"doctype": dt, "name": d.name, "docstatus": d.docstatus, "item": d.get("item"), "qty": d.get("qty")} for dt in ("Material Request", "Work Order")
+		for d in frappe.get_all(dt, filters={"ppc_mrp_run": run.name}, fields=["name", "docstatus"] + (["production_item as item", "qty"] if dt == "Work Order" else []))]
+	lines = frappe.get_all("PPC MRP Line", filters={"parent": run.name}, fields=["item_code", "action", "net_qty", "approved_qty", "original_qty", "create_document", "skip_reason", "revised_by"], order_by="idx")
+	audit = [r.action for r in frappe.get_all("PPC Audit Log", filters=[["details", "like", f'%"{run.name}"%']], fields=["action"], order_by="creation asc")]
+	return {"run": run.name, "status": run.status, "approval_status": run.approval_status, "approved_by": run.approved_by, "has_key": bool(run.approval_key),
+		"cancel_reason": run.cancel_reason, "documents": docs, "lines": lines, "audit": audit}
+
+
+def mrp_cleanup() -> dict:
+	"""Remove every MRP run, draft document, Sales Order and master the MRP browser test made. Idempotent."""
+	_admin()
+	problems = []
+	items = [MRP_FG, MRP_RM, MRP_BUY]
+	orders = sorted(set(frappe.get_all("Sales Order Item", filters={"item_code": ["in", items]}, pluck="parent")))
+	runs = sorted(set(frappe.get_all("PPC MRP Source", filters={"source_name": ["in", orders or [""]]}, pluck="parent") +
+		frappe.get_all("PPC MRP Run", filters={"source_sales_order": ["in", orders or [""]]}, pluck="name")))
+	for run in runs:
+		for dt in ("Work Order", "Material Request"):
+			for name in frappe.get_all(dt, filters={"ppc_mrp_run": run}, pluck="name"):
+				_cancel_delete(dt, name, problems)
+	for dt in ("Work Order",):  # drafts made without a run link would be unexpected: report, never delete blindly
+		stray = frappe.get_all(dt, filters={"production_item": MRP_FG}, pluck="name")
+		if stray:
+			problems.append(f"{dt} for {MRP_FG} not linked to a run: {stray}")
+	for run in runs:
+		# The product keeps a run that created documents "as the record of why" and refuses to delete it. The drafts of this disposable
+		# test run were just removed above, so there is nothing left to record: reopen it so that it can be removed too.
+		if not frappe.db.count("Work Order", {"ppc_mrp_run": run}) and not frappe.db.count("Material Request", {"ppc_mrp_run": run}):
+			frappe.db.set_value("PPC MRP Run", run, "status", "Calculated", update_modified=False)
+		frappe.db.delete("PPC Audit Log", {"details": ["like", f'%"{run}"%']})
+		_try(f"run {run}", lambda run=run: frappe.delete_doc("PPC MRP Run", run, force=True, ignore_permissions=True), problems)
+	frappe.db.delete("PPC Audit Log", {"action": ["in", ["MRP Policy Changed"]], "owner": ["in", [MANAGER, VIEWER]]})
+	frappe.db.commit()
+	for so in orders:
+		_cancel_delete("Sales Order", so, problems)
+	for bom in frappe.get_all("BOM", filters={"item": ["in", items]}, pluck="name"):
+		_cancel_delete("BOM", bom, problems)
+	out = cleanup()
+	out["problems"] = problems + list(out.get("problems") or [])
+	out["left"] = dict(out.get("left") or {}, **{k: v for k, v in {
+		"PPC MRP Run": frappe.db.count("PPC MRP Run", {"name": ["in", runs or [""]]}),
+		"Sales Order": frappe.db.count("Sales Order", {"name": ["in", orders or [""]]}),
+		"Material Request": frappe.db.count("Material Request", {"ppc_mrp_run": ["in", runs or [""]]}),
+		"Work Order": frappe.db.count("Work Order", {"ppc_mrp_run": ["in", runs or [""]]}),
+	}.items() if v})
+	out["clean"] = not out["left"] and not out["problems"]
+	return out

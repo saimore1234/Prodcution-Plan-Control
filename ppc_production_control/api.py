@@ -19,7 +19,7 @@ from frappe import _
 from frappe.utils import cint
 
 from ppc_production_control.services import job_cards as jc_service
-from ppc_production_control.services import control_center, mrp, queries, reconcile, recommend, revisions, scheduling, sync, workstation_change
+from ppc_production_control.services import control_center, mrp, mrp_approval, queries, reconcile, recommend, revisions, scheduling, sync, workstation_change
 from ppc_production_control.services import work_orders as wo_service
 from ppc_production_control.services.constants import (
 	AUDIT_DT,
@@ -577,3 +577,67 @@ def mrp_review_data(run) -> dict:
 def mrp_save_review(run, lines) -> dict:
 	"""Store the reviewer's ticks and edited quantities (validated); creates nothing."""
 	return {"ok": True, **mrp.save_review(run, as_list(lines))}
+
+
+# ---- review and approval (services/mrp_approval.py). Reads are GET; everything that changes a run is POST.
+@frappe.whitelist()
+@guarded
+def mrp_run_for_source(doctype, name) -> dict:
+	"""State of the automatic MRP run of a submitted Sales Order / Production Plan: waiting, calculating, calculated, approved, cancelled or
+	failed. The dialog polls this; `enabled` false means it must not open at all."""
+	return mrp_approval.run_for_source(doctype, name)
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_calculate_now(doctype, name) -> dict:
+	"""The dialog's "Calculate Now" when no background worker answers: the same calculation, here and now, never twice and never a second run."""
+	return {"ok": True, **mrp_approval.calculate_now(doctype, name)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_approve_and_create(run, approval_key, token, lines=None, confirm=0) -> dict:
+	"""Approve the review and create the draft Material Request / Work Orders exactly once (see mrp_approval.approve_and_create)."""
+	return {"ok": True, **mrp_approval.approve_and_create(run, approval_key, token, None if lines in (None, "") else as_list(lines), confirm)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_revise_lines(run, lines) -> dict:
+	"""Revise the quantity to create of one or more lines: [{name, qty}]."""
+	return {"ok": True, **mrp_approval.revise_lines(run, as_list(lines))}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_revise_line(run, line, qty) -> dict:
+	return {"ok": True, **mrp_approval.revise_line(run, line, qty)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_skip_line(run, line, reason) -> dict:
+	"""Leave one recommendation out of the documents; the reason is mandatory."""
+	return {"ok": True, **mrp_approval.skip_line(run, line, reason)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_cancel_run(run, reason) -> dict:
+	"""Close the review without creating anything; the reason is mandatory."""
+	return {"ok": True, **mrp_approval.cancel_run(run, reason)}
+
+
+@frappe.whitelist(methods=["POST"])
+@guarded
+def mrp_recalculate(run) -> dict:
+	"""Calculate again with today's stock and supply (revisions and skips are discarded; a cancelled review is reopened)."""
+	return {"ok": True, **mrp_approval.recalculate(run)}
+
+
+@frappe.whitelist()
+@guarded
+def mrp_overview(filters=None) -> dict:
+	"""Cross-run MRP KPIs (real database data) with filters: company, warehouse, from_date, to_date, item, procurement_type, status, source."""
+	return mrp.overview(parse_json(filters, {}))

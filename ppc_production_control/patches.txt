@@ -7,3 +7,5 @@ ppc_production_control.patches.v1_0.remove_ppc_plan_doctypes
 ppc_production_control.patches.v1_0.retag_job_cards
 ppc_production_control.patches.v1_1.backfill_schedule_history
 ppc_production_control.patches.v1_2.remove_old_workspace
+ppc_production_control.patches.v1_7.rename_procurement_type
+ppc_production_control.patches.v1_7.fill_missing_mrp_settings

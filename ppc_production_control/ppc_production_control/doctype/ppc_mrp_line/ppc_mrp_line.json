@@ -16,6 +16,9 @@
   "action",
   "create_document",
   "approved_qty",
+  "original_qty",
+  "revised_by",
+  "skip_reason",
   "whole_number",
   "procurement_type",
   "source_documents",
@@ -116,6 +119,9 @@
    "label": "Quantity to Create",
    "description": "Set in the MRP Review; defaults to the shortage."
   },
+  {"fieldname": "original_qty", "fieldtype": "Float", "label": "Original Quantity", "read_only": 1, "description": "The quantity the calculation recommended, kept when a reviewer revises Quantity to Create."},
+  {"fieldname": "revised_by", "fieldtype": "Link", "label": "Revised By", "options": "User", "read_only": 1},
+  {"fieldname": "skip_reason", "fieldtype": "Small Text", "label": "Skip Reason", "read_only": 1, "description": "Why a reviewer excluded this recommendation. Required whenever a recommendation is skipped."},
   {
    "fieldname": "whole_number",
    "fieldtype": "Check",
@@ -219,7 +225,7 @@
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-10-30 09:00:00.000000",
+ "modified": "2026-11-13 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "PPC Production Control",
  "name": "PPC MRP Line",

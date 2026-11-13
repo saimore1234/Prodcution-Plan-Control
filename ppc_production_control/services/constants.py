@@ -37,6 +37,41 @@ DEFAULT_CAPABILITY_ROLES = {
 # Work Order statuses ---------------------------------------------------------------------------
 WO_LOCKED_STATUSES = ("Completed", "Stopped", "Closed", "Cancelled")
 
+# Demand documents that no longer need (and therefore no longer reserve) material -------------------
+CLOSED_SO_STATUSES = ("Closed", "On Hold", "Completed", "Cancelled")
+CLOSED_PLAN_STATUSES = ("Completed", "Closed", "Cancelled")
+
+# MRP review and approval --------------------------------------------------------------------------
+AP_AWAITING, AP_APPROVED, AP_CANCELLED = "Awaiting Review", "Approved", "Cancelled"
+A_MRP_CALC_NOW, A_MRP_RECALC, A_MRP_REVISE, A_MRP_SKIP, A_MRP_APPROVE, A_MRP_CANCEL, A_MRP_POLICY, A_MRP_POLICY_CHANGE = (
+	"MRP Calculate Now", "MRP Recalculated", "MRP Line Revised", "MRP Line Skipped", "MRP Approved", "MRP Review Cancelled",
+	"MRP Automation Policy", "MRP Policy Changed",
+)
+MIN_REASON_LENGTH = 3  # a skip / cancel reason must say something
+
+# Recommended PPC Settings (MRP). The DocType JSON carries the same values as field defaults; every `setting(field, default)`
+# fallback reads this table, so "nothing stored" always means the recommended value (a test keeps the three in step).
+MRP_SETTING_DEFAULTS = {
+	"mrp_enabled": 1,
+	"mrp_auto_on_sales_order": 1,
+	"mrp_trigger_production_plan": 1,
+	"mrp_auto_create_drafts": 0,  # drafts are created only after a person reviews, unless an administrator switches this on
+	"mrp_review_mode": "Review First",
+	"mrp_warehouse_policy": "Demand Warehouse",
+	"mrp_include_safety_stock": 1,
+	"mrp_include_incoming_po": 1,
+	"mrp_include_existing_wo": 1,
+	"mrp_planning_horizon_days": 365,
+	"mrp_default_lead_time_days": 0,
+	"mrp_max_retries": 2,
+	"mrp_notify_on_failure": 1,
+}
+
+# An automatic MRP run that is still "Queued" after this long lost its background job (worker down, Redis restarted, job killed);
+# the hourly recovery task (mrp_auto.recover_stuck_runs) calculates it again. At most this many runs per hourly pass.
+MRP_STUCK_AFTER_MINUTES = 30
+MRP_RECOVERY_BATCH = 50
+
 # Job Card statuses ---------------------------------------------------------------------------
 JC_DONE_STATUSES = ("Completed", "Submitted", "Cancelled")
 # A Job Card can only be re-scheduled while ERPNext has not started or finished it.
